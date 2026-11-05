@@ -1,0 +1,25 @@
+#cloud-config
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Lei Zhou
+#
+# cloud-init user-data for the Debian test guest used by
+# runbooks/qnx-probe-launch.sh.
+#
+# Login is by SSH key only. Replace the placeholder below with the
+# contents of your own public key (for example ~/.ssh/id_ed25519.pub)
+# before building the seed image. Password login is disabled.
+#
+# Passwordless sudo is kept because the runbook starts Xorg in the
+# guest over a non-interactive SSH session (`sudo Xorg :0 ...`).
+users:
+  - name: debian
+    lock_passwd: true
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - REPLACE_WITH_YOUR_SSH_PUBLIC_KEY
+ssh_pwauth: false
+package_update: true
+packages:
+  - xorg
+  - mesa-utils
