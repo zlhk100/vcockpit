@@ -1,0 +1,18 @@
+# Build output
+build/
+builddir/
+
+# VM images and cloud-init seeds (large, user-supplied, never committed)
+vms/
+*.qcow2
+*.img
+*.iso
+
+# Filled-in cloud-init config carries your public key
+guest/debian/user-data
+
+# Private working files
+CLAUDE.md
+*_context*.md
+_archive/
+_snapshots/
