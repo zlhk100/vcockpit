@@ -61,7 +61,7 @@ same format QEMU's SDL display uses, so the same `weston.ini` serves both.
 
 | Decision | Reason |
 |---|---|
-| One hypervisor, QEMU, for every guest | QNX needs full PC emulation with firmware, which lighter VMMs such as crosvm do not provide. |
+| One hypervisor, QEMU, for every guest | The x86 QNX QEMU target image used here boots through PC firmware, which QEMU provides; one VMM keeps both guests on the same display path. |
 | The display bridge is a separate process | A fault in the display path must not stop the hypervisor. |
 | One proxy per VM, handling all of that VM's consoles | QEMU exposes one D-Bus display per instance; several clients would compete for it. |
 | Weston with the IVI shell as host compositor | Layout is set in pixel coordinates per surface and layer. `agl-compositor` assigns roles (fullscreen, split, float) rather than coordinates, which does not give a fixed multi-zone layout without custom policy. |
