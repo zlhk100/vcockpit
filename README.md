@@ -66,8 +66,11 @@ does not take the hypervisor down with it.
 Everything here has been run on one machine only:
 
 - Ubuntu 22.04 host with an AMD RDNA3 GPU
-- QEMU 9.2 built from source with D-Bus display and OpenGL support, linked
-  against virglrenderer 1.3.0
+- QEMU 9.2.4, an unmodified upstream release, built from source with the
+  SDL and D-Bus displays and OpenGL support, linked against
+  virglrenderer 1.3.0
+- SDL2 2.28.5 built from source with only the Wayland video driver (X11
+  disabled); the reference runbook has been run with this build
 - Docker, with the host X11 socket and the GPU device nodes passed into
   the compositor container
 - QNX SDP 8.0 QEMU target image (QSTI), installed through QNX Software
