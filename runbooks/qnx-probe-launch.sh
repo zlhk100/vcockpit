@@ -151,7 +151,7 @@ DEBIAN_PID=$!
     export SDL_VIDEODRIVER=wayland
     export XDG_RUNTIME_DIR=/tmp/weston-shared
     export WAYLAND_DISPLAY=wayland-1
-    "$QEMU_BIN" \
+    exec "$QEMU_BIN" \
         -name "qemu-qnx" \
         --enable-kvm \
         -smp 4 \
