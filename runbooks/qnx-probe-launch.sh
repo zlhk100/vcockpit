@@ -31,7 +31,7 @@ set -e
 RUNBOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$RUNBOOK_DIR")"   # repository root
 
-DOCKER_IMAGE="${DOCKER_IMAGE:-automotive-dash-platform:phase2-verified-20260401}"
+DOCKER_IMAGE="${DOCKER_IMAGE:-automotive-dash-platform:latest}"
 WAYLAND_SOCKET="${WAYLAND_SOCKET:-/tmp/weston-shared/wayland-1}"
 WESTON_INI="${WESTON_INI:-/tmp/weston-phase2.ini}"
 DEBIAN_IMAGE="${DEBIAN_IMAGE:-$WORKSPACE_DIR/vms/debian-ivi-guest.qcow2}"

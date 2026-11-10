@@ -92,8 +92,8 @@ docker build -t automotive-dash-platform:latest compositor/
 meson setup build proxy && ninja -C build
 ```
 
-The runbook defaults to the image tag of the test machine; set
-`DOCKER_IMAGE=automotive-dash-platform:latest` to use the image built above.
+The runbook uses `automotive-dash-platform:latest`, the image built
+above; set `DOCKER_IMAGE` to use another tag.
 Then follow [docs/running-the-proxy.md](docs/running-the-proxy.md) to
 start the compositor, a QNX guest with `-display dbus,gl=on`, and the
 proxy.
