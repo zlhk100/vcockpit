@@ -95,6 +95,12 @@ EOF
 
 # Step 2: Start Weston IVI container
 echo "[2/6] Starting Weston IVI container..."
+# The compositor sets its runtime directory to mode 0700 at start-up. Create
+# the host side of that bind mount owned by this user first: a directory that
+# Docker creates is owned by root, and this user's QEMU could not reach the
+# Wayland socket inside it.
+sudo mkdir -p /tmp/weston-shared
+sudo chown "$(id -u):$(id -g)" /tmp/weston-shared
 xhost +local:docker
 docker run --rm -d \
     -v /tmp/weston-shared:/tmp/weston-runtime \
