@@ -14,9 +14,21 @@ BUILD := build
 SRCS  := src/main.c
 BIN   := $(BUILD)/cluster-gauge
 
-.PHONY: all clean
+HOST_CC     ?= cc
+HOST_CFLAGS ?= -O2 -std=c11 -Wall -Wextra
+HOST_TEST   := $(BUILD)/host/drive_cycle_test
+
+.PHONY: all clean host-test
 
 all: $(BIN)
+
+# Drive cycle test (T1), built and run with the host compiler.
+host-test: $(HOST_TEST)
+	./$(HOST_TEST)
+
+$(HOST_TEST): src/drive_cycle.c src/drive_cycle.h
+	mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_CFLAGS) -DDRIVE_CYCLE_HOST_TEST -o $@ src/drive_cycle.c -lm
 
 $(BIN): $(SRCS) | $(BUILD)
 	$(QCC) -V$(QVARIANT) $(CFLAGS) -o $@ $(SRCS) $(LDLIBS)
