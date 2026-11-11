@@ -6,6 +6,8 @@
 #include <gio/gunixfdlist.h>
 #include <unistd.h>
 
+/* Subset of the org.qemu.Display1.Listener interface, from QEMU's
+ * ui/dbus-display1.xml (GPL-2.0-or-later). */
 static const gchar introspection_xml[] =
   "<node>"
   "  <interface name='org.qemu.Display1.Listener'>"
