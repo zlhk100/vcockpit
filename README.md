@@ -59,6 +59,7 @@ does not take the hypervisor down with it.
 | [`compositor/`](compositor/) | Container image for the host compositor: Weston 10 with the COVESA IVI extension 2.3.1, plus `ivi-input-set` for input focus |
 | [`runbooks/`](runbooks/) | `qnx-probe-launch.sh`: QNX and Debian side by side through QEMU's SDL display (the reference path the proxy replaces) |
 | [`guest/debian/`](guest/debian/) | cloud-init template for the Debian test guest |
+| [`qnx/`](qnx/) | Programs for the QNX guest: [`cluster-gauge`](qnx/cluster-gauge/), an instrument cluster drawn with Screen and OpenGL ES 2 (C, QNX SDP 8.0) |
 | [`docs/`](docs/) | [Architecture](docs/architecture.md), [running the proxy](docs/running-the-proxy.md), [QNX guest setup](docs/qnx-guest.md), [pitfalls and fixes](docs/findings.md), [roadmap](docs/roadmap.md) |
 
 ## Tested setup
