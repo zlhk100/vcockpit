@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Lei Zhou
+
 # Build output
 build/
 builddir/
@@ -10,9 +13,3 @@ vms/
 
 # Filled-in cloud-init config carries your public key
 guest/debian/user-data
-
-# Private working files
-CLAUDE.md
-*_context*.md
-_archive/
-_snapshots/
