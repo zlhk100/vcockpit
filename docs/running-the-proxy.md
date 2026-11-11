@@ -48,6 +48,8 @@ mode=3840x1080
 Save it as `/tmp/weston-phase2.ini`, then:
 
 ```bash
+sudo mkdir -p /tmp/weston-shared
+sudo chown "$(id -u):$(id -g)" /tmp/weston-shared
 xhost +local:docker
 docker run --rm -d \
     -v /tmp/weston-shared:/tmp/weston-runtime \
@@ -61,6 +63,10 @@ docker run --rm -d \
 sleep 3 && sudo chmod 777 /tmp/weston-shared/wayland-1
 ```
 
+The compositor sets `/tmp/weston-shared` to mode 0700 at start-up. Creating
+it yourself first keeps it yours; a directory that Docker creates is owned
+by root, and QEMU and the proxy, running as you, could not reach the socket.
+
 ## 2. QNX guest with the D-Bus display
 
 The guest image must have had the one-time Screen configuration edit
@@ -70,7 +76,7 @@ described in [qnx-guest.md](qnx-guest.md).
 (
     source ~/workspace/qnx8/toolchain/qnxsdp-env.sh > /dev/null 2>&1
     QNX=~/workspace/qnx8/toolchain/images/qemu/qemu/output
-    qemu-system-x86_64 \
+    "${QEMU_BIN:-qemu-system-x86_64}" \
         -name qemu-qnx \
         --enable-kvm -smp 4 -m 4G \
         -cpu host,host-phys-bits-limit=40 \
@@ -88,6 +94,9 @@ described in [qnx-guest.md](qnx-guest.md).
         -device virtio-net-pci,netdev=net0
 ) > /tmp/qemu-qnx.log 2>&1 &
 ```
+
+Set `QEMU_BIN` to your QEMU build if it is not the `qemu-system-x86_64` on
+your `PATH`, for example `QEMU_BIN=~/qemu/build/qemu-system-x86_64`.
 
 `-vga none` is required. Without it QEMU adds a legacy VGA console as
 console 0, the virtio GPU becomes console 1, and the guest comes up at
