@@ -15,6 +15,9 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
+#include "drive_cycle.h"
+#include "render.h"
+
 #define FPS_INTERVAL_FRAMES 300
 
 static volatile sig_atomic_t stop_requested;
@@ -245,6 +248,10 @@ int main(int argc, char **argv)
 
 	if (platform_init(&p) != 0)
 		return 1;
+	if (render_init(p.width, p.height) != 0) {
+		platform_shutdown(&p);
+		return 1;
+	}
 
 	printf("cluster-gauge: %dx%d\n", p.width, p.height);
 	fflush(stdout);
@@ -253,16 +260,17 @@ int main(int argc, char **argv)
 	t_fps = t0;
 	while (!stop_requested) {
 		double t = now_s();
+		struct gauge_state st;
 
 		if (limit_s > 0.0 && t - t0 >= limit_s)
 			break;
 
-		/* Skeleton: one solid colour per frame. */
-		glClearColor(0.0f, 0.35f, 0.75f, 1.0f);
-		glClear(GL_COLOR_BUFFER_BIT);
+		drive_cycle_state(t - t0, &st);
+		render_frame(&st);
 
 		if (!eglSwapBuffers(p.dpy, p.surf)) {
 			fail_egl("eglSwapBuffers");
+			render_shutdown();
 			platform_shutdown(&p);
 			return 1;
 		}
@@ -277,6 +285,7 @@ int main(int argc, char **argv)
 		}
 	}
 
+	render_shutdown();
 	platform_shutdown(&p);
 	return 0;
 }

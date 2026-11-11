@@ -11,7 +11,8 @@ CFLAGS   += -std=c11 -D_QNX_SOURCE -Wall -Wextra
 LDLIBS   := -lscreen -lEGL -lGLESv2 -lm
 
 BUILD := build
-SRCS  := src/main.c
+SRCS  := src/main.c src/render.c src/drive_cycle.c
+HDRS  := src/render.h src/drive_cycle.h
 BIN   := $(BUILD)/cluster-gauge
 
 HOST_CC     ?= cc
@@ -30,7 +31,7 @@ $(HOST_TEST): src/drive_cycle.c src/drive_cycle.h
 	mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_CFLAGS) -DDRIVE_CYCLE_HOST_TEST -o $@ src/drive_cycle.c -lm
 
-$(BIN): $(SRCS) | $(BUILD)
+$(BIN): $(SRCS) $(HDRS) | $(BUILD)
 	$(QCC) -V$(QVARIANT) $(CFLAGS) -o $@ $(SRCS) $(LDLIBS)
 
 $(BUILD):
