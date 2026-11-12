@@ -14,13 +14,12 @@ Copyright (C) 2026 Lei Zhou
   placement and input focus.
 - D-Bus proxy: a QNX guest rendered through QEMU's `-display dbus,gl=on`
   into IVI surface 1000 at 1280x720, frames imported as dma-bufs.
+- Proxy clean shutdown: SIGINT and SIGTERM end the GLib main loop
+  (`g_unix_signal_add`); the proxy closes its D-Bus connections and
+  removes its surface from the compositor before it exits.
 
 ## Next: finish the proxy
 
-- **Clean shutdown.** Handle SIGTERM and SIGINT through the GLib main loop
-  (`g_unix_signal_add`) instead of a raw `signal()` handler, release the
-  surfaces and close the D-Bus connections, so that the surface leaves the
-  compositor on exit.
 - **Automatic keyboard focus.** On `wl_pointer` enter and leave, move
   keyboard focus to the surface under the pointer.
 - **Input forwarding.** Pass `wl_keyboard` and `wl_pointer` events to QEMU

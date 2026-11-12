@@ -165,7 +165,18 @@ mouse.
 
 ## Stop
 
-Stop the proxy with Ctrl+C, then `docker stop dash-test`, then stop QEMU.
-A clean proxy shutdown that also removes its surface from the compositor
-is not yet verified ([roadmap](roadmap.md)); restart the container before
-the next run.
+Stop the proxy with Ctrl+C or SIGTERM. It closes its D-Bus connections,
+removes its surface from the compositor and exits with status 0:
+
+```
+Shutting down (SIGINT)...
+Shut down: 1 surface(s) removed
+```
+
+`LayerManagerControl get surfaces` no longer lists surface 1000 and the
+compositor keeps running. Then `docker stop dash-test`, then stop QEMU.
+
+The compositor keeps layer 1000 after the proxy exits. A proxy started
+again against the same compositor brings surface 1000 back with frames,
+but not on the layer and not visible. Restart the container before the
+next run ([findings](findings.md#stale-ivi-state)).
