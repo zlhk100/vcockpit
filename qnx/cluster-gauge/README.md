@@ -53,6 +53,46 @@ and `libGLESv2` from the SDP. The binary is
 subshell, as above, for the reason given in
 [QNX guest](../../docs/qnx-guest.md).
 
+Other targets: `make DEBUG=1` builds with `-O0 -g`; `make install` copies
+the binary to `build/stage/system/bin/` (set `DESTDIR` to change the
+staging directory). The version string printed by `--version` is
+`git describe --always --dirty` at build time.
+
+## Coding standard and `make check`
+
+The code follows the [C coding standard](../../docs/coding-standard.md).
+`make check`, with the SDP environment sourced, is the gate for every
+change. It runs:
+
+1. the QNX build with the standard's warning set, warnings as errors
+2. the host test of the drive cycle
+3. the static-storage check: every writable symbol in the object files
+   (`nm` types `b B d D`) must be listed in
+   [`static-storage-allowlist.txt`](static-storage-allowlist.txt), and every
+   entry must match a symbol; and the forbidden-call checks (no
+   `sigaction` or `signal()`, no `malloc`/`calloc`/`realloc`/`free`)
+4. `cppcheck` and `clang-tidy` (`cert-*`, `bugprone-*`); a tool that is not
+   installed fails the gate
+
+Places where a rule is not met are recorded in
+[`DEVIATIONS.md`](DEVIATIONS.md).
+
+## State and threads
+
+One thread runs all of the program; it creates no thread. The Screen and
+EGL handles live in a structure on `main`'s stack. The renderer's state,
+including a 64 KB vertex buffer, is one structure declared `static` inside
+`main`, so it is off the stack; `main` passes it by pointer to the
+renderer, the only code that writes it. The drive-cycle state is computed
+fresh each frame. Everything else with static storage is a constant table.
+
+SIGINT and SIGTERM are blocked before Screen or EGL start, so threads the
+graphics libraries create inherit the mask, and are polled once per frame
+with `sigtimedwait()`; there is no signal handler. Screen events are
+drained once per frame without blocking; a close event ends the program
+like SIGTERM. The memory of the process is locked with `mlockall()` after
+start-up.
+
 ## Run in the guest (development)
 
 Start the compositor, the QNX guest and the proxy as in
@@ -88,15 +128,34 @@ Starting the gauge automatically at guest boot is not covered here yet.
 
 | Option | Effect |
 |---|---|
-| `--seconds N` | Exit with status 0 after N seconds |
+| `--seconds N` | Exit with status 0 after N seconds; N must be a finite number greater than 0 |
+| `--priority N` | Run at `SCHED_RR` priority N; if that fails, exit with status 1 |
+| `--help` | Print usage and exit |
+| `--version` | Print the version and exit |
 
-Without options it runs until SIGINT or SIGTERM, then exits with status 0.
-It prints the buffer size once and a frame rate line every 300 frames:
+An invalid option or value prints the usage and exits with status 2.
+Without `--seconds` it runs until SIGINT, SIGTERM or a Screen close event,
+then exits with status 0.
+
+Output:
 
 ```
-cluster-gauge: 1280x720
-cluster-gauge: frames 300, 60.6 fps
+cluster-gauge 192e476: 1280x720, SCHED_RR priority 10 (inherited), mlockall ok
+cluster-gauge: frames 300, 60.4 fps, overruns 0, longest frame 19.0 ms
+...
+cluster-gauge: stopped (--seconds elapsed): frames 1802, overruns 0, longest frame 19.4 ms
 ```
+
+- The start-up line gives the version, the buffer size, the scheduling
+  policy and priority (inherited, or set by `--priority`), and whether
+  `mlockall()` succeeded; a failure is reported and is not fatal.
+- Every 300 frames: the frame rate, the number of overruns since start (a
+  frame taking longer than two display periods at 60 Hz, 33.3 ms) and the
+  longest frame in those 300 frames.
+- On exit: why it stopped, the frame count, overruns and the longest frame
+  of the run.
+- If the vertex buffer fills during a frame, a line on stderr gives the
+  number of vertices dropped in that frame.
 
 If Screen, EGL or OpenGL ES cannot be initialised, it prints one line
 naming the call that failed and exits with status 1.
@@ -120,5 +179,5 @@ and RPM within 0–7000.
 
 In the guest, run `./cluster-gauge --seconds 60` and check that the
 frame counter of surface 1000 rises through the run
-([running the proxy](../../docs/running-the-proxy.md), section 5) and
-that the frame rate lines are close to 60.
+([running the proxy](../../docs/running-the-proxy.md), section 5), that
+the frame rate lines are close to 60 and that the overrun count stays 0.
