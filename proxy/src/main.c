@@ -2,20 +2,74 @@
  * Copyright (C) 2026 Lei Zhou
  */
 #include <glib.h>
+#include <glib-unix.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include "wayland.h"
 #include "dbus.h"
 
-static GMainLoop *g_loop = NULL;
+/* Owned by main(); handed to the signal sources as user data. */
+typedef struct {
+    GMainLoop  *loop;
+    const char *signal_name;  /* set by the source that ended the loop */
+} ShutdownRequest;
 
-static void
-signal_handler(int sig)
+/* Runs from the main loop (g_unix_signal_add), not from a signal handler. */
+static gboolean
+on_sigint(gpointer user_data)
 {
-    (void)sig;
-    if (g_loop)
-        g_main_loop_quit(g_loop);
+    ShutdownRequest *req = user_data;
+    req->signal_name = "SIGINT";
+    g_main_loop_quit(req->loop);
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean
+on_sigterm(gpointer user_data)
+{
+    ShutdownRequest *req = user_data;
+    req->signal_name = "SIGTERM";
+    g_main_loop_quit(req->loop);
+    return G_SOURCE_CONTINUE;
+}
+
+/*
+ * Unmap and destroy every scanout surface, then wait (one roundtrip) until
+ * the compositor has processed the destroy requests, so that it has removed
+ * the surfaces before we disconnect. Call after dbus_destroy(), so that QEMU
+ * no longer sends frames. Returns the number of surfaces removed, or -1 if
+ * the roundtrip failed.
+ */
+static int
+remove_surfaces(WaylandState *ws)
+{
+    int removed = 0;
+
+    for (int i = 0; i < ws->n_scanouts; i++) {
+        if (!ws->scanouts[i].surface)
+            continue;
+        wl_surface_attach(ws->scanouts[i].surface, NULL, 0, 0);
+        wl_surface_commit(ws->scanouts[i].surface);
+        if (ws->scanouts[i].toplevel) {
+            xdg_toplevel_destroy(ws->scanouts[i].toplevel);
+            ws->scanouts[i].toplevel = NULL;
+        }
+        if (ws->scanouts[i].xdg_surface) {
+            xdg_surface_destroy(ws->scanouts[i].xdg_surface);
+            ws->scanouts[i].xdg_surface = NULL;
+        }
+        wl_surface_destroy(ws->scanouts[i].surface);
+        ws->scanouts[i].surface = NULL;
+        removed++;
+    }
+
+    if (wl_display_roundtrip(ws->display) < 0) {
+        fprintf(stderr, "Shut down: Wayland roundtrip failed: %s\n",
+                g_strerror(wl_display_get_error(ws->display)));
+        return -1;
+    }
+    return removed;
 }
 
 int
@@ -66,13 +120,17 @@ main(int argc, char *argv[])
     printf("Scanouts:       %d\n", n_scanouts);
     printf("==================================================\n");
 
-    /* Install signal handlers for clean shutdown */
-    signal(SIGTERM, signal_handler);
-    signal(SIGINT,  signal_handler);
+    /* SIGINT and SIGTERM end the main loop (no application signal handler) */
+    ShutdownRequest req = { g_main_loop_new(NULL, FALSE), NULL };
+    guint sigint_id  = g_unix_signal_add(SIGINT,  on_sigint,  &req);
+    guint sigterm_id = g_unix_signal_add(SIGTERM, on_sigterm, &req);
     signal(SIGPIPE, SIG_IGN);
 
     WaylandState *ws = wayland_init(wayland_socket, vm_name, n_scanouts);
     if (!ws) {
+        g_source_remove(sigint_id);
+        g_source_remove(sigterm_id);
+        g_main_loop_unref(req.loop);
         g_free(vm_name);
         g_free(wayland_socket);
         return EXIT_FAILURE;
@@ -109,15 +167,30 @@ main(int argc, char *argv[])
     printf("    LayerManagerControl get surfaces'\n");
     printf("\nPress Ctrl+C to exit.\n\n");
 
-    g_loop = g_main_loop_new(NULL, FALSE);
-    wayland_attach_to_mainloop(ws, g_loop);
-    g_main_loop_run(g_loop);
+    wayland_attach_to_mainloop(ws, req.loop);
+    g_main_loop_run(req.loop);
 
-    printf("\nShutting down...\n");
+    printf("\nShutting down (%s)...\n", req.signal_name ? req.signal_name : "unknown");
+
+    g_source_remove(sigint_id);
+    g_source_remove(sigterm_id);
+
+    /* 1. Close the D-Bus connections first, so QEMU stops sending frames. */
+    dbus_destroy(ws);
+
+    /* 2. Remove the surfaces and wait until the compositor has processed them. */
+    int exit_status = EXIT_SUCCESS;
+    int removed = remove_surfaces(ws);
+    if (removed < 0)
+        exit_status = EXIT_FAILURE;
+    else
+        printf("Shut down: %d surface(s) removed\n", removed);
+
+    /* 3. Release the remaining objects and disconnect. */
     wayland_destroy(ws);
-    g_main_loop_unref(g_loop);
+    g_main_loop_unref(req.loop);
     g_free(vm_name);
     g_free(wayland_socket);
 
-    return EXIT_SUCCESS;
+    return exit_status;
 }
