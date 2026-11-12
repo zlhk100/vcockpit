@@ -11,7 +11,11 @@
 #   install    copy the program to $(DESTDIR)$(BINDIR) (default build/stage/system/bin)
 #   clean
 # Variables:
-#   DEBUG=1    build with -O0 -g instead of -O2
+#   DEBUG=1            build with -O0 -g instead of -O2
+#   FAULT_INJECTION=1  add --inject-telltale-fault, for testing telltale-monitor
+#                      only; the version string ends in "+fault-injection".
+#                      The default build has no fault-injection code, and
+#                      "make check" fails if it finds any.
 
 QCC      ?= qcc
 QVARIANT ?= gcc_ntox86_64
@@ -29,6 +33,9 @@ OPT := -O2
 endif
 
 VERSION := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
+ifeq ($(FAULT_INJECTION),1)
+VERSION := $(VERSION)+fault-injection
+endif
 
 CFLAGS   := -std=c11 $(OPT) $(WARNINGS)
 # Headers shared with telltale-monitor
@@ -63,6 +70,12 @@ CPPCHECK_FLAGS := --enable=warning,style,performance,portability --std=c11 \
 		  -D_QNX_SOURCE -D__QNX__=800 -D__QNXNTO__=1 -I$(COMMON)
 CLANG_TIDY_CHECKS := -*,cert-*,bugprone-*
 
+ifeq ($(FAULT_INJECTION),1)
+CPPFLAGS       += -DFAULT_INJECTION=1
+ANALYSIS_DEFS  += -DFAULT_INJECTION=1
+CPPCHECK_FLAGS += -DFAULT_INJECTION=1
+endif
+
 .PHONY: all objs check host-test install clean FORCE
 
 all: $(BIN)
@@ -75,7 +88,8 @@ $(BIN): $(OBJS)
 $(OBJ)/%.o: src/%.c $(HDRS) | $(OBJ)
 	$(QCC) -V$(QVARIANT) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-# The version string is fixed at build time; main.o is rebuilt when it changes.
+# The version string is fixed at build time; main.o is rebuilt when it
+# changes, and so when FAULT_INJECTION changes.
 $(OBJ)/main.o: CPPFLAGS += -DCLUSTER_GAUGE_VERSION='"$(VERSION)"'
 $(OBJ)/main.o: $(VERSION_STAMP)
 
@@ -107,7 +121,7 @@ check:
 	echo '== check 2/4: host test (T1)'; \
 	if $(MAKE) --no-print-directory host-test; then echo 'check 2/4: PASS'; \
 	else echo 'check 2/4: FAIL'; fail=1; fi; \
-	echo '== check 3/4: static storage (CS-STATE-1), forbidden calls (CS-RT-2, CS-RT-3)'; \
+	echo '== check 3/4: static storage (CS-STATE-1), forbidden calls (CS-RT-2, CS-RT-3), fault injection'; \
 	part=0; \
 	./check-static-storage.sh '$(QNM)' static-storage-allowlist.txt $(SRCS) || part=1; \
 	if grep -nE '\bsigaction\b|\bsignal[[:space:]]*\(' $(SRCS) $(HDRS); then \
@@ -120,6 +134,20 @@ check:
 	done; \
 	if [ -n "$$heap" ]; then echo "CS-RT-3: heap calls imported:$$heap"; part=1; \
 	else echo 'CS-RT-3: no malloc/calloc/realloc/free imported by program objects'; fi; \
+	if [ ! -f $(BIN) ]; then echo "fault injection: $(BIN) missing, not checked"; part=1; \
+	else \
+		inj=$$($(QNM) $(BIN) | grep -i inject); \
+		str=$$(grep -c -a -e '--inject-telltale-fault' $(BIN)); \
+		if [ '$(FAULT_INJECTION)' = 1 ]; then \
+			if [ -n "$$inj" ] && [ "$$str" != 0 ]; then \
+				echo "fault injection: present, as built with FAULT_INJECTION=1: $$(echo $$inj)"; \
+			else echo 'fault injection: FAULT_INJECTION=1 build has no injection code'; part=1; fi; \
+		else \
+			if [ -z "$$inj" ] && [ "$$str" = 0 ]; then \
+				echo 'fault injection: no injection symbol or option in the default build'; \
+			else echo "fault injection: FOUND in the default build: $$(echo $$inj) ($$str option strings)"; part=1; fi; \
+		fi; \
+	fi; \
 	if [ $$part -eq 0 ]; then echo 'check 3/4: PASS'; else echo 'check 3/4: FAIL'; fail=1; fi; \
 	echo '== check 4/4: static analysis'; \
 	part=0; \

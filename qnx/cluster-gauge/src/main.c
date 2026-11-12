@@ -11,19 +11,33 @@
  * create inherit the mask) and polled once per frame with sigtimedwait();
  * there is no signal handler. Screen events are drained once per frame
  * without blocking.
+ *
+ * Commanded telltale state: main creates the shared object
+ * TELLTALE_STATE_SHM_NAME (telltale_layout.h) and maps it read-write; the
+ * frame loop stores one atomic word per frame (publish_frame), after the
+ * drive cycle and before rendering; main unlinks the object at exit.
+ * struct publisher lives on main's stack.
+ *
+ * Fault injection (FAULT_INJECTION=1 builds only, absent from the default
+ * build): --inject-telltale-fault <name>@<seconds> draws telltale <name>
+ * inverted from that time on, while the published state stays correct.
  */
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <screen/screen.h>
 #include <EGL/egl.h>
@@ -44,6 +58,12 @@
 
 #define EXIT_USAGE 2
 
+/* The published word is shared between processes: its atomic operations
+ * must not depend on a lock inside this process. */
+_Static_assert(ATOMIC_LONG_LOCK_FREE == 2 && ATOMIC_LLONG_LOCK_FREE == 2,
+	       "64-bit atomics are not lock-free");
+_Static_assert(sizeof(uint64_t) == 8, "uint64_t is not 8 bytes");
+
 struct platform {
 	screen_context_t ctx;
 	screen_window_t win;
@@ -55,10 +75,28 @@ struct platform {
 	int height;
 };
 
+#ifdef FAULT_INJECTION
+/* --inject-telltale-fault <name>@<seconds> */
+struct fault_injection {
+	const struct telltale_def *tt;	/* NULL: no injection */
+	double at_s;
+};
+#endif
+
 struct options {
 	double limit_s;		/* 0: run until stopped */
 	int priority;
 	int set_priority;	/* 1: --priority given */
+#ifdef FAULT_INJECTION
+	struct fault_injection fault;
+#endif
+};
+
+/* The commanded-state publisher: the mapping of the shared object. */
+struct publisher {
+	void *map;		/* the mapping; NULL: not mapped */
+	_Atomic uint64_t *word;	/* the word at the start of the mapping */
+	uint32_t seq;		/* seq of the last published word */
 };
 
 enum stop_reason { STOP_SECONDS, STOP_SIGINT, STOP_SIGTERM, STOP_CLOSE, STOP_ERROR };
@@ -124,6 +162,14 @@ static void usage(FILE *f, const char *argv0)
 		      "  --seconds N   exit with status 0 after N seconds (N finite, > 0)\n"
 		      "  --priority N  run at SCHED_RR priority N (default: inherited)\n",
 		      argv0);
+#ifdef FAULT_INJECTION
+	/* usage text; nothing to do if the write fails */
+	(void)fprintf(f,
+		      "  --inject-telltale-fault NAME@S\n"
+		      "                draw telltale NAME inverted from S seconds on (S finite,\n"
+		      "                >= 0); the published state stays correct. NAME is one of\n"
+		      "                turn_left seatbelt high_beam check_engine turn_right\n");
+#endif
 }
 
 /* A finite positive number of seconds, no range error. */
@@ -139,6 +185,39 @@ static int parse_seconds(const char *s, double *out_s)
 	*out_s = v;
 	return 0;
 }
+
+#ifdef FAULT_INJECTION
+/* "<name>@<seconds>": name a telltale of telltale_table, seconds finite and
+ * >= 0, no range error. */
+static int parse_fault(const char *s, struct fault_injection *fi)
+{
+	const char *at = strchr(s, '@');
+	size_t len, i;
+	char *end;
+	double v;
+
+	if (at == NULL)
+		return -1;
+	len = (size_t)(at - s);
+	fi->tt = NULL;
+	for (i = 0; i < TELLTALE_COUNT; i++) {
+		const char *name = telltale_table[i].name;
+
+		if (strlen(name) == len && strncmp(name, s, len) == 0)
+			fi->tt = &telltale_table[i];
+	}
+	if (fi->tt == NULL)
+		return -1;
+	errno = 0;
+	v = strtod(at + 1, &end);
+	if (end == at + 1 || *end != '\0' || errno == ERANGE || !isfinite(v) || v < 0.0) {
+		fi->tt = NULL;
+		return -1;
+	}
+	fi->at_s = v;
+	return 0;
+}
+#endif
 
 /* A decimal int. Whether the priority is valid is decided by the OS. */
 static int parse_int(const char *s, int *out_i)
@@ -163,6 +242,10 @@ static enum args_result parse_args(int argc, char **argv, struct options *o)
 	o->limit_s = 0.0;
 	o->priority = 0;
 	o->set_priority = 0;
+#ifdef FAULT_INJECTION
+	o->fault.tt = NULL;
+	o->fault.at_s = 0.0;
+#endif
 	for (i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--help") == 0) {
 			usage(stdout, argv[0]);
@@ -177,6 +260,11 @@ static enum args_result parse_args(int argc, char **argv, struct options *o)
 			if (parse_int(argv[++i], &o->priority) != 0)
 				return ARGS_BAD;
 			o->set_priority = 1;
+#ifdef FAULT_INJECTION
+		} else if (strcmp(argv[i], "--inject-telltale-fault") == 0 && i + 1 < argc) {
+			if (parse_fault(argv[++i], &o->fault) != 0)
+				return ARGS_BAD;
+#endif
 		} else {
 			return ARGS_BAD;
 		}
@@ -462,6 +550,89 @@ static int platform_drain_events(struct platform *p)
 	return close_seen;
 }
 
+/* ---- commanded telltale state ---- */
+
+/* Create (or reuse) the shared object, size it, map it read-write and store
+ * 0 (nothing published). Returns 0, or -1 after printing the failing call;
+ * on failure nothing is left mapped or linked. */
+static int publish_open(struct publisher *pb)
+{
+	void *m;
+	int fd;
+
+	pb->map = NULL;
+	pb->word = NULL;
+	pb->seq = 0;
+	fd = shm_open(TELLTALE_STATE_SHM_NAME, O_RDWR | O_CREAT, 0644);
+	if (fd < 0) {
+		fail_errno("shm_open(" TELLTALE_STATE_SHM_NAME ")");
+		return -1;
+	}
+	if (ftruncate(fd, (off_t)TELLTALE_STATE_SHM_SIZE) != 0) {
+		fail_errno("ftruncate(" TELLTALE_STATE_SHM_NAME ")");
+		/* failure path: the descriptor and name are released; nothing
+		 * further to do if that fails */
+		(void)close(fd);
+		(void)shm_unlink(TELLTALE_STATE_SHM_NAME);
+		return -1;
+	}
+	m = mmap(NULL, TELLTALE_STATE_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (m == MAP_FAILED) {
+		fail_errno("mmap(" TELLTALE_STATE_SHM_NAME ")");
+		/* failure path, as above */
+		(void)close(fd);
+		(void)shm_unlink(TELLTALE_STATE_SHM_NAME);
+		return -1;
+	}
+	/* the mapping stays valid without the descriptor; a failed close
+	 * leaks one descriptor and changes nothing else */
+	(void)close(fd);
+	pb->map = m;
+	pb->word = m;
+	atomic_store_explicit(pb->word, 0u, memory_order_release);
+	return 0;
+}
+
+/* Publish the commanded telltale bits of st, the state of the frame at t
+ * seconds after start: one atomic store of the packed word. Precondition:
+ * publish_open succeeded. Cannot fail. */
+static void publish_frame(struct publisher *pb, double t, const struct gauge_state *st)
+{
+	uint32_t t_ms = (uint32_t)fmod(t * 1000.0, 65536.0);
+
+	pb->seq++;
+	if (pb->seq == 0u)
+		pb->seq = 1u;	/* 0 means "nothing published" */
+	atomic_store_explicit(pb->word, telltale_state_pack(pb->seq, t_ms, st->telltales),
+			      memory_order_release);
+}
+
+/* Unmap and unlink the shared object. Safe after a failed publish_open. */
+static void publish_close(struct publisher *pb)
+{
+	if (pb->map == NULL)
+		return;
+	/* shutdown: nothing further to release if these fail */
+	(void)munmap(pb->map, TELLTALE_STATE_SHM_SIZE);
+	(void)shm_unlink(TELLTALE_STATE_SHM_NAME);
+	pb->map = NULL;
+	pb->word = NULL;
+}
+
+#ifdef FAULT_INJECTION
+/* From fi->at_s on, invert the injected telltale's bit in the state to be
+ * drawn. Returns 1 if it inverted the bit, 0 if not. Kept out of line so
+ * that its symbol marks a fault-injection build. */
+static int __attribute__((noinline)) fault_injection_apply(const struct fault_injection *fi,
+							    double t, struct gauge_state *drawn)
+{
+	if (fi->tt == NULL || t < fi->at_s)
+		return 0;
+	drawn->telltales ^= fi->tt->bit;
+	return 1;
+}
+#endif
+
 /* ---- frame loop ---- */
 
 struct frame_stats {
@@ -487,11 +658,14 @@ static const char *stop_name(enum stop_reason why)
 	}
 }
 
-static enum stop_reason run(struct platform *p, struct renderer *r, const struct options *o,
-			    const sigset_t *sigs, struct frame_stats *fs)
+static enum stop_reason run(struct platform *p, struct renderer *r, struct publisher *pb,
+			    const struct options *o, const sigset_t *sigs, struct frame_stats *fs)
 {
 	double t0 = now_s();
 	double t_prev = t0, t_fps = t0;
+#ifdef FAULT_INJECTION
+	int injecting = 0;
+#endif
 
 	for (;;) {
 		double t = now_s();
@@ -524,6 +698,14 @@ static enum stop_reason run(struct platform *p, struct renderer *r, const struct
 			return STOP_SECONDS;
 
 		drive_cycle_state(t - t0, &st);
+		publish_frame(pb, t - t0, &st);
+#ifdef FAULT_INJECTION
+		if (fault_injection_apply(&o->fault, t - t0, &st) && !injecting) {
+			injecting = 1;
+			log_out("cluster-gauge: fault injection: drawing %s inverted from t=%.3f s\n",
+				o->fault.tt->name, t - t0);
+		}
+#endif
 		dropped = render_frame(r, &st);
 		if (dropped > 0)
 			log_err("cluster-gauge: frame %lu: vertex buffer full, "
@@ -553,6 +735,7 @@ int main(int argc, char **argv)
 	 * stack. Written only through the pointer passed below. */
 	static struct renderer renderer;
 	struct platform p;
+	struct publisher pb;
 	struct options opt;
 	struct frame_stats fs = { 0, 0, 0.0, 0.0 };
 	struct render_viewport vp;
@@ -584,6 +767,11 @@ int main(int argc, char **argv)
 		platform_shutdown(&p);
 		return 1;
 	}
+	if (publish_open(&pb) != 0) {
+		render_shutdown(&renderer);
+		platform_shutdown(&p);
+		return 1;
+	}
 
 	mlock_rc = mlockall(MCL_CURRENT | MCL_FUTURE);
 	if (mlock_rc != 0)
@@ -593,9 +781,18 @@ int main(int argc, char **argv)
 	    CLUSTER_GAUGE_VERSION, p.width, p.height, policy_name(si.policy), si.priority,
 	    opt.set_priority ? "set by --priority" : "inherited",
 	    mlock_rc == 0 ? "ok" : "failed: ", mlock_rc == 0 ? "" : strerror(mlock_errno));
+	log_out("cluster-gauge: publishing telltale state to %s\n", TELLTALE_STATE_SHM_NAME);
+#ifdef FAULT_INJECTION
+	if (opt.fault.tt != NULL)
+		log_out("cluster-gauge: FAULT INJECTION BUILD: %s drawn inverted from %.3f s\n",
+			opt.fault.tt->name, opt.fault.at_s);
+	else
+		log_out("cluster-gauge: FAULT INJECTION BUILD: no fault requested\n");
+#endif
 
-	why = run(&p, &renderer, &opt, &sigs, &fs);
+	why = run(&p, &renderer, &pb, &opt, &sigs, &fs);
 
+	publish_close(&pb);
 	render_shutdown(&renderer);
 	platform_shutdown(&p);
 	log_out("cluster-gauge: stopped (%s): frames %lu, overruns %lu, longest frame %.1f ms\n",

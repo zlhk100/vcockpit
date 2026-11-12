@@ -18,6 +18,7 @@
 #define VCOCKPIT_TELLTALE_LAYOUT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* Telltale state bits, as commanded by the gauge's drive cycle and as
  * published to the monitor. Bits outside TT_ALL are never set. */
@@ -78,5 +79,48 @@ static const struct telltale_def telltale_table[TELLTALE_COUNT] = {
 	{ "turn_right", TT_TURN_RIGHT, { 1140.0f, 30.0f, 80.0f, 80.0f }, { 38, 217, 64 },
 	  2, { { 1163.0f, 70.0f }, { 1194.0f, 70.0f } } },
 };
+
+/* ---- Commanded telltale state, published by the gauge ----
+ *
+ * POSIX shared memory object TELLTALE_STATE_SHM_NAME, TELLTALE_STATE_SHM_SIZE
+ * bytes, created by the gauge (read-write) and mapped read-only by the
+ * monitor. It holds one _Atomic uint64_t word at offset 0, stored by the
+ * gauge once per frame and loaded by the monitor, each in one atomic
+ * operation:
+ *
+ *   bits 63..32  seq   frame sequence number, +1 per published frame,
+ *                      never 0 once published (0: nothing published yet)
+ *   bits 31..16  t_ms  time since gauge start, ms, modulo 65536
+ *   bits 15..0   telltale bits (TT_*; bits outside TT_ALL are 0)
+ */
+#define TELLTALE_STATE_SHM_NAME "/vcockpit-telltale-state"
+#define TELLTALE_STATE_SHM_SIZE 4096u
+
+/* The word packed from seq, t_ms (taken modulo 65536) and bits (only
+ * TT_ALL bits are kept). Cannot fail. */
+static inline uint64_t telltale_state_pack(uint32_t seq, uint32_t t_ms, unsigned bits)
+{
+	return ((uint64_t)seq << 32) | ((uint64_t)(t_ms & 0xffffu) << 16) |
+	       (uint64_t)(bits & TT_ALL);
+}
+
+/* The seq field of word w. Cannot fail. */
+static inline uint32_t telltale_state_seq(uint64_t w)
+{
+	return (uint32_t)(w >> 32);
+}
+
+/* The t_ms field of word w. Cannot fail. */
+static inline uint32_t telltale_state_t_ms(uint64_t w)
+{
+	return (uint32_t)((w >> 16) & 0xffffu);
+}
+
+/* The telltale bits field of word w, all 16 bits (a reader checks that
+ * none outside TT_ALL is set). Cannot fail. */
+static inline unsigned telltale_state_bits(uint64_t w)
+{
+	return (unsigned)(w & 0xffffu);
+}
 
 #endif
