@@ -11,8 +11,8 @@ OpenGL ES 2. Run in the QNX guest, it appears on the host through
 application.
 
 It is a demonstration workload, not a vehicle function: it reads no
-vehicle bus or sensor input. It is developed following ASIL-B-oriented
-practices; it is not certified.
+vehicle bus or sensor input; its only input is the pause control below.
+It is developed following ASIL-B-oriented practices; it is not certified.
 
 It publishes the telltale state it commands, so that
 [`telltale-monitor`](../telltale-monitor/), a separate process, can check
@@ -149,6 +149,27 @@ The default build contains no fault-injection code and rejects the
 option; `make check` verifies both. Use the fault-injection build for
 testing only.
 
+## Pause control
+
+A left click anywhere on the gauge, or Space, pauses the drive cycle; the
+next click or Space resumes it. Held Space does not toggle again: key
+repeats are ignored. While paused, the speed, RPM and telltales hold and
+two white bars are drawn below the speed digits; frames are still drawn
+and the telltale state is still published every frame, so
+`telltale-monitor` keeps checking. On resume the cycle continues from
+where it stopped.
+
+Each toggle is logged:
+
+```
+cluster-gauge: drive cycle paused at t=11.079 s
+cluster-gauge: drive cycle resumed, paused 3.115 s
+```
+
+`t` is the drive-cycle time (time since start minus the time spent
+paused). On the host the clicks and keys reach the guest through the
+proxy's input forwarding ([running the proxy](../../docs/running-the-proxy.md#6-input)).
+
 ## Run in the guest (development)
 
 Start the compositor, the QNX guest and the proxy as in
@@ -233,7 +254,9 @@ make -C qnx/cluster-gauge host-test
 
 It checks the speed band and the telltales at fixed times, that the same
 time always gives the same state, and that speed stays within 0–200 km/h
-and RPM within 0–7000.
+and RPM within 0–7000. It also checks the pause arithmetic: a pause holds
+the state, a resume continues without a jump, two toggles in one frame
+change nothing, and a pause at start holds the bulb check.
 
 In the guest, run `./cluster-gauge --seconds 60` and check that the
 frame counter of surface 1000 rises through the run

@@ -47,6 +47,18 @@ QEMU must already be on the session bus as `org.qemu`
 | `Disable` | Detach the buffer |
 | `Scanout`, `Update` (pixel copy) | Refused with an error |
 
+## Input
+
+Pointer and keyboard events that the compositor delivers to a proxy
+surface are forwarded to QEMU's `org.qemu.Display1.Mouse` and
+`org.qemu.Display1.Keyboard` interfaces on the console that feeds the
+surface: positions (absolute or relative, following QEMU's `IsAbsolute`),
+buttons, the vertical wheel, and keys as QEMU key numbers from a fixed
+table; keys not in the table are dropped and counted. Held buttons and
+keys are released when focus leaves the surface and at shutdown, which
+prints the input counters. Keyboard focus is given by the compositor
+(`ivi-input-set`, see [running the proxy](../docs/running-the-proxy.md#6-input)).
+
 ## Source
 
 | File | Contents |
@@ -55,3 +67,4 @@ QEMU must already be on the session bus as `org.qemu`
 | `src/wayland.c` | Wayland connection, surfaces, dma-buf import, GLib source for the Wayland socket |
 | `src/dbus.c` | Session bus, `ConsoleIDs`, `RegisterListener` and the peer-to-peer connections |
 | `src/listener.c` | `org.qemu.Display1.Listener` implementation |
+| `src/input.c` | Pointer and keyboard forwarding to `org.qemu.Display1.Mouse` and `Keyboard` |

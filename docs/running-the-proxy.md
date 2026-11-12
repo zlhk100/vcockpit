@@ -160,8 +160,46 @@ docker exec dash-test bash -c '
 `original size` should read `x=1280, y=720`. The frame counter rises when
 the guest redraws; a static screen sends few frames.
 
-Input is not forwarded yet: the QNX surface does not react to keyboard or
-mouse.
+## 6. Input
+
+The proxy forwards pointer and keyboard events that the compositor
+delivers to its own surface to QEMU's `org.qemu.Display1.Mouse` and
+`org.qemu.Display1.Keyboard` interfaces on `Console_0`:
+
+- pointer position, as an absolute position in guest pixels (or as
+  relative motion while QEMU reports a relative mouse); the proxy follows
+  QEMU's `IsAbsolute` property, which turns true once the guest's input
+  driver is up
+- left, right and middle buttons, side and extra buttons, and the
+  vertical wheel
+- keys, as QEMU key numbers (AT set 1). The keyboard layout is the
+  guest's. Keys without a number in the proxy's table are not sent; they
+  are counted
+
+Buttons and keys still held when the pointer or keyboard leaves the
+surface, or when the proxy stops, are released in the guest.
+
+The compositor sends keyboard events to surface 1000 only after it has
+been given keyboard focus:
+
+```bash
+docker exec dash-test bash -c '
+    export XDG_RUNTIME_DIR=/tmp/weston-runtime
+    export WAYLAND_DISPLAY=wayland-1
+    ivi-input-set 1000'
+```
+
+Run it after section 4. With no second guest it also prints
+`surface ID 2000 not found`, which is expected. If the compositor's window
+loses focus on the host desktop, keyboard focus on surface 1000 is lost
+too; focus the compositor's window and run `ivi-input-set 1000` again.
+Pointer input does not need this.
+
+Every button press is logged with the guest position:
+
+```
+Input: Console_0 button 0 press at (717,449)
+```
 
 ## Stop
 
@@ -170,8 +208,12 @@ removes its surface from the compositor and exits with status 0:
 
 ```
 Shutting down (SIGINT)...
+Input: 6436 motion, 138 button, 76 key calls; 0 unmapped keys; 0 call errors
 Shut down: 1 surface(s) removed
 ```
+
+The `Input:` line counts the calls made to QEMU, the keys dropped because
+they have no QEMU key number, and the calls QEMU answered with an error.
 
 `LayerManagerControl get surfaces` no longer lists surface 1000 and the
 compositor keeps running. Then `docker stop dash-test`, then stop QEMU.
