@@ -4,6 +4,7 @@
 #define _GNU_SOURCE
 #include "wayland.h"
 #include "dbus.h"
+#include "input.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,6 +97,8 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
         if (version >= 3) ws->linux_dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, MIN_VER(version, 3));
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         ws->shm = wl_registry_bind(registry, name, &wl_shm_interface, MIN_VER(version, 1));
+    } else if (strcmp(interface, wl_seat_interface.name) == 0) {
+        input_bind_seat(ws, registry, name, version);
     }
 }
 static void registry_global_remove(void *data, struct wl_registry *registry, uint32_t name) { (void)data; (void)registry; (void)name; }
@@ -111,6 +114,8 @@ WaylandState *wayland_init(const char *wayland_socket, const char *vm_name, int 
         ws->scanouts[i].p2p_fd = -1;
     }
     ws->drm_fd = -1;
+    ws->pointer_focus = -1;
+    ws->keyboard_focus = -1;
     strncpy(ws->vm_name, vm_name, sizeof(ws->vm_name) - 1);
     ws->n_scanouts = (n_scanouts > MAX_SCANOUTS) ? MAX_SCANOUTS : n_scanouts;
 
@@ -183,6 +188,9 @@ void wayland_destroy(WaylandState *ws) {
         if (ws->scanouts[i].xdg_surface) xdg_surface_destroy(ws->scanouts[i].xdg_surface);
         if (ws->scanouts[i].surface) wl_surface_destroy(ws->scanouts[i].surface);
     }
+    if (ws->keyboard) wl_keyboard_destroy(ws->keyboard);
+    if (ws->pointer) wl_pointer_destroy(ws->pointer);
+    if (ws->seat) wl_seat_destroy(ws->seat);
     if (ws->linux_dmabuf) zwp_linux_dmabuf_v1_destroy(ws->linux_dmabuf);
     if (ws->shm) wl_shm_destroy(ws->shm);
     if (ws->wm_base) xdg_wm_base_destroy(ws->wm_base);
@@ -331,6 +339,9 @@ void wayland_import_qemu_dmabuf(WaylandState *ws, int scanout_index, int fd,
 
     ws->scanouts[scanout_index].dmabuf_buffer = buffer;
     ws->scanouts[scanout_index].dmabuf_ready = true;
+    /* Guest scanout size for input positions (the console size changes during boot). */
+    ws->scanouts[scanout_index].width = (int)w;
+    ws->scanouts[scanout_index].height = (int)h;
 
     printf("ScanoutDMABUF: import OK scanout=%d %ux%u fourcc=0x%08x modifier=0x%016lx\n",
            scanout_index, w, h, fourcc, (unsigned long)modifier);

@@ -51,7 +51,8 @@ executable('automotive-dbus-proxy',
         'src/main.c', 
         'src/wayland.c', 
         'src/dbus.c',
-        'src/listener.c'
+        'src/listener.c',
+        'src/input.c'
     ] + protocols_src + protocols_hdrs,
     dependencies: [glib_dep, wayland_client_dep, gbm_dep, gio_unix_dep],
     include_directories: inc,

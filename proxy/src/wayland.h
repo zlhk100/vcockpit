@@ -49,7 +49,29 @@ typedef struct {
 
         GDBusConnection              *p2p_conn;
         int                           p2p_fd;
+
+        /* Input (input.c) */
+        char                          console_path[48]; /* /org/qemu/Display1/Console_<i> */
+        bool                          is_absolute;      /* QEMU Mouse.IsAbsolute */
+        guint                         props_sub_id;     /* PropertiesChanged subscription */
+        int                           last_x, last_y;   /* guest pixels, last sent */
+        int                           width, height;    /* guest scanout size, from frames */
     } scanouts[MAX_SCANOUTS];
+
+    /* Input (input.c): seat, focus, pending motion, held state, counters */
+    struct wl_seat                   *seat;
+    struct wl_pointer                *pointer;
+    struct wl_keyboard               *keyboard;
+    uint32_t                          seat_version;
+    int                               pointer_focus;    /* scanout index or -1 */
+    int                               keyboard_focus;   /* scanout index or -1 */
+    bool                              pending_motion;
+    wl_fixed_t                        pending_x, pending_y;
+    uint32_t                          held_buttons;     /* bit n: QEMU button n pressed */
+    uint32_t                          held_keys[8];     /* bit q: QEMU key number q pressed */
+    int                               range_min_x, range_max_x, range_min_y, range_max_y;
+    unsigned long                     sent_motion, sent_button, sent_key;
+    unsigned long                     dropped_key_unmapped, call_errors;
 
     char                              vm_name[32];
 } WaylandState;

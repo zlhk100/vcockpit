@@ -8,6 +8,7 @@
 #include <signal.h>
 #include "wayland.h"
 #include "dbus.h"
+#include "input.h"
 
 /* Owned by main(); handed to the signal sources as user data. */
 typedef struct {
@@ -153,6 +154,9 @@ main(int argc, char *argv[])
     }
 
     if (dbus_init(ws) == 0) {
+        /* Before the listeners: once registered, QEMU waits for the proxy to
+         * answer frame calls, and a synchronous read here would stall both. */
+        input_dbus_init(ws);
         if (dbus_register_listeners(ws) != 0) {
             fprintf(stderr, "WARNING: D-Bus listener registration failed\n");
         }
@@ -175,10 +179,13 @@ main(int argc, char *argv[])
     g_source_remove(sigint_id);
     g_source_remove(sigterm_id);
 
-    /* 1. Close the D-Bus connections first, so QEMU stops sending frames. */
+    /* 1. Release held buttons and keys in the guest, print the input counters. */
+    input_shutdown(ws);
+
+    /* 2. Close the D-Bus connections, so QEMU stops sending frames. */
     dbus_destroy(ws);
 
-    /* 2. Remove the surfaces and wait until the compositor has processed them. */
+    /* 3. Remove the surfaces and wait until the compositor has processed them. */
     int exit_status = EXIT_SUCCESS;
     int removed = remove_surfaces(ws);
     if (removed < 0)
@@ -186,7 +193,7 @@ main(int argc, char *argv[])
     else
         printf("Shut down: %d surface(s) removed\n", removed);
 
-    /* 3. Release the remaining objects and disconnect. */
+    /* 4. Release the remaining objects and disconnect. */
     wayland_destroy(ws);
     g_main_loop_unref(req.loop);
     g_free(vm_name);
