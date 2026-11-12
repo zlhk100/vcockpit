@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Lei Zhou
+#
+# Static-storage allowlist (coding standard CS-STATE-1).
+# Mutable objects with static storage duration that the program may have.
+# One line per symbol: <symbol> <file> <reason>
+# telltale-monitor has none: every mutable object is automatic in main.
