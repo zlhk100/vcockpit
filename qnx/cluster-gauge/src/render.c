@@ -42,6 +42,15 @@
 #define RPM_REDLINE  6000.0f
 #define RPM_TICKS     7
 
+/* Pause glyph: two vertical bars inside the layout box (610, 630, 60, 60),
+ * clear of every telltale box (y 30-110) and kept above the RPM bar
+ * (y >= 660): bars 14 x 24 px at y 632-656, 10 px apart, centred on x 640. */
+#define PAUSE_BAR_W   14.0f
+#define PAUSE_BAR_H   24.0f
+#define PAUSE_GAP     10.0f
+#define PAUSE_TOP    632.0f
+#define PAUSE_CX     640.0f
+
 struct rgba { float r, g, b, a; };
 struct vec2 { float x, y; };
 struct box { float x, y, w, h; };
@@ -57,7 +66,7 @@ struct seven_seg { struct box box; float t; };
 /* Colours of everything but the telltales; those are in telltale_layout.h. */
 enum colour {
 	COL_TRACK, COL_ARC, COL_TICK, COL_NEEDLE, COL_HUB, COL_SEG_ON, COL_SEG_OFF,
-	COL_RPM, COL_RED,
+	COL_RPM, COL_RED, COL_PAUSE,
 	COL_COUNT
 };
 
@@ -71,6 +80,7 @@ static const struct rgba palette[COL_COUNT] = {
 	[COL_SEG_OFF] = { 0.08f, 0.09f, 0.11f, 1.0f },
 	[COL_RPM]     = { 0.95f, 0.80f, 0.20f, 1.0f },
 	[COL_RED]     = { 0.45f, 0.06f, 0.06f, 1.0f },
+	[COL_PAUSE]   = { 0.902f, 0.902f, 0.902f, 1.0f },	/* (230,230,230) */
 };
 
 /* Seven-segment digits, bits a..g = 0..6 */
@@ -492,6 +502,16 @@ int render_init(struct renderer *r, struct render_viewport vp)
 	return 0;
 }
 
+static void pause_glyph(struct renderer *r)
+{
+	const float half_gap = PAUSE_GAP * 0.5f;
+
+	rect(r, (struct box){ PAUSE_CX - half_gap - PAUSE_BAR_W, PAUSE_TOP,
+			      PAUSE_BAR_W, PAUSE_BAR_H });
+	rect(r, (struct box){ PAUSE_CX + half_gap, PAUSE_TOP, PAUSE_BAR_W, PAUSE_BAR_H });
+	draw(r, COL_PAUSE);
+}
+
 size_t render_frame(struct renderer *r, const struct gauge_state *s)
 {
 	r->nverts = 0;
@@ -504,6 +524,8 @@ size_t render_frame(struct renderer *r, const struct gauge_state *s)
 	number3(r, (struct vec2){ SPD_CX, SPD_CY + 70.0f }, (int)(s->speed_kmh + 0.5f));
 	rpm_bar(r, s->rpm);
 	telltales(r, s->telltales);
+	if (s->paused)
+		pause_glyph(r);
 	return r->dropped;
 }
 

@@ -12,6 +12,11 @@
  * there is no signal handler. Screen events are drained once per frame
  * without blocking.
  *
+ * Pause control: a left-button press on the window or a Space key-down
+ * (not a repeat) toggles a pause of the drive cycle. The pause state and
+ * the last button state are automatic objects of the frame loop (run),
+ * passed by pointer to the event drain and the pause functions.
+ *
  * Commanded telltale state: main creates the shared object
  * TELLTALE_STATE_SHM_NAME (telltale_layout.h) and maps it read-write; the
  * frame loop stores one atomic word per frame (publish_frame), after the
@@ -40,6 +45,7 @@
 #include <unistd.h>
 
 #include <screen/screen.h>
+#include <sys/keycodes.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
@@ -523,16 +529,56 @@ fail:
 	return -1;
 }
 
+/* 1 if the pointer event in ev is a press of the left button (set now,
+ * clear in *buttons_prev); stores the buttons in *buttons_prev. -1 on error. */
+static int pointer_left_press(screen_event_t ev, int *buttons_prev)
+{
+	int buttons = 0;
+	int press;
+
+	if (screen_get_event_property_iv(ev, SCREEN_PROPERTY_BUTTONS, &buttons) != 0) {
+		fail_errno("screen_get_event_property_iv(SCREEN_PROPERTY_BUTTONS)");
+		return -1;
+	}
+	press = (buttons & SCREEN_LEFT_MOUSE_BUTTON) &&
+		!(*buttons_prev & SCREEN_LEFT_MOUSE_BUTTON);
+	*buttons_prev = buttons;
+	return press;
+}
+
+/* 1 if the keyboard event in ev is a Space key-down that is not a repeat,
+ * 0 if not, -1 on error. */
+static int key_space_down(screen_event_t ev)
+{
+	int flags = 0;
+	int sym = 0;
+
+	if (screen_get_event_property_iv(ev, SCREEN_PROPERTY_FLAGS, &flags) != 0) {
+		fail_errno("screen_get_event_property_iv(SCREEN_PROPERTY_FLAGS)");
+		return -1;
+	}
+	if (screen_get_event_property_iv(ev, SCREEN_PROPERTY_SYM, &sym) != 0) {
+		fail_errno("screen_get_event_property_iv(SCREEN_PROPERTY_SYM)");
+		return -1;
+	}
+	return (flags & KEY_DOWN) && !(flags & KEY_REPEAT) && sym == KEYCODE_SPACE;
+}
+
 /* Drain pending Screen events without blocking, at most
- * MAX_EVENTS_PER_FRAME per call. Returns 1 if a close event was seen, 0 if
- * not, -1 on error. Other events are discarded. */
-static int platform_drain_events(struct platform *p)
+ * MAX_EVENTS_PER_FRAME per call. Counts pause toggle requests (left-button
+ * press, Space key-down) into *toggles; *buttons_prev is the button state
+ * of the last pointer event, kept by the caller across calls. Returns 1 if
+ * a close event was seen, 0 if not, -1 on error. Other events are
+ * discarded. */
+static int platform_drain_events(struct platform *p, int *buttons_prev, unsigned *toggles)
 {
 	int close_seen = 0;
 	int n;
 
+	*toggles = 0u;
 	for (n = 0; n < MAX_EVENTS_PER_FRAME; n++) {
 		int type = SCREEN_EVENT_NONE;
+		int req = 0;
 
 		if (screen_get_event(p->ctx, p->ev, 0) != 0) {
 			fail_errno("screen_get_event");
@@ -546,6 +592,14 @@ static int platform_drain_events(struct platform *p)
 			break;
 		if (type == SCREEN_EVENT_CLOSE)
 			close_seen = 1;
+		else if (type == SCREEN_EVENT_POINTER)
+			req = pointer_left_press(p->ev, buttons_prev);
+		else if (type == SCREEN_EVENT_KEYBOARD)
+			req = key_space_down(p->ev);
+		if (req < 0)
+			return -1;
+		if (req > 0)
+			(*toggles)++;
 	}
 	return close_seen;
 }
@@ -663,15 +717,21 @@ static enum stop_reason run(struct platform *p, struct renderer *r, struct publi
 {
 	double t0 = now_s();
 	double t_prev = t0, t_fps = t0;
+	struct drive_cycle_pause pause;
+	int buttons_prev = 0;
 #ifdef FAULT_INJECTION
 	int injecting = 0;
 #endif
 
+	drive_cycle_pause_init(&pause);
 	for (;;) {
 		double t = now_s();
 		double dt = t - t_prev;
+		double t_cycle;
 		struct gauge_state st;
 		size_t dropped;
+		struct drive_cycle_toggles req;
+		unsigned toggles = 0u;
 		int sig, ev;
 
 		t_prev = t;
@@ -689,7 +749,7 @@ static enum stop_reason run(struct platform *p, struct renderer *r, struct publi
 			return STOP_SIGINT;
 		if (sig == SIGTERM)
 			return STOP_SIGTERM;
-		ev = platform_drain_events(p);
+		ev = platform_drain_events(p, &buttons_prev, &toggles);
 		if (ev < 0)
 			return STOP_ERROR;
 		if (ev > 0)
@@ -697,7 +757,18 @@ static enum stop_reason run(struct platform *p, struct renderer *r, struct publi
 		if (o->limit_s > 0.0 && t - t0 >= o->limit_s)
 			return STOP_SECONDS;
 
-		drive_cycle_state(t - t0, &st);
+		req = (struct drive_cycle_toggles){ toggles, t - t0 };
+		if (drive_cycle_pause_apply(&pause, req)) {
+			if (pause.paused)
+				log_out("cluster-gauge: drive cycle paused at t=%.3f s\n",
+					drive_cycle_pause_time(&pause, t - t0));
+			else
+				log_out("cluster-gauge: drive cycle resumed, paused %.3f s\n",
+					t - t0 - pause.pause_started_s);
+		}
+		t_cycle = drive_cycle_pause_time(&pause, t - t0);
+		drive_cycle_state(t_cycle, &st);
+		st.paused = pause.paused;
 		publish_frame(pb, t - t0, &st);
 #ifdef FAULT_INJECTION
 		if (fault_injection_apply(&o->fault, t - t0, &st) && !injecting) {

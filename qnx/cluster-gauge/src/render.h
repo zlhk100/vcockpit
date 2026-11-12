@@ -44,7 +44,8 @@ struct renderer {
  * failure nothing is left to release. */
 int render_init(struct renderer *r, struct render_viewport vp);
 
-/* Draw one frame for state s. Precondition: render_init(r) succeeded.
+/* Draw one frame for state s; when s->paused, also the pause glyph.
+ * Precondition: render_init(r) succeeded.
  * Returns the number of vertices dropped because the vertex buffer was
  * full (0 when the frame is complete). */
 size_t render_frame(struct renderer *r, const struct gauge_state *s);

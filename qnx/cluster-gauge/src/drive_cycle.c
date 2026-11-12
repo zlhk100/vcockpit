@@ -106,6 +106,34 @@ void drive_cycle_state(double t, struct gauge_state *s)
 		s->telltales |= TT_ALL;
 }
 
+void drive_cycle_pause_init(struct drive_cycle_pause *p)
+{
+	p->paused = 0u;
+	p->pause_started_s = 0.0;
+	p->paused_total_s = 0.0;
+}
+
+int drive_cycle_pause_apply(struct drive_cycle_pause *p, struct drive_cycle_toggles req)
+{
+	if (req.count % 2u == 0u)
+		return 0;
+	if (p->paused) {
+		p->paused_total_s += req.at_s - p->pause_started_s;
+		p->paused = 0u;
+	} else {
+		p->pause_started_s = req.at_s;
+		p->paused = 1u;
+	}
+	return 1;
+}
+
+double drive_cycle_pause_time(const struct drive_cycle_pause *p, double e)
+{
+	double t = (p->paused ? p->pause_started_s : e) - p->paused_total_s;
+
+	return t < 0.0 ? 0.0 : t;
+}
+
 #ifdef DRIVE_CYCLE_HOST_TEST
 #include <stdio.h>
 
@@ -184,6 +212,63 @@ int main(void)
 		expect(&failures, (a.telltales & ~TT_ALL) == 0, "only defined bits", t);
 		if (failures > 20)
 			break;
+	}
+
+	/* Pause-time arithmetic */
+	{
+		struct drive_cycle_pause p;
+		struct drive_cycle_toggles req;
+		struct gauge_state held, now;
+		int changed;
+
+		/* Pause at 10 s: cycle time holds at 10 s, so the state holds */
+		drive_cycle_pause_init(&p);
+		expect(&failures, drive_cycle_pause_time(&p, 7.0) == 7.0, "running: t = e", 7.0);
+		req = (struct drive_cycle_toggles){ 1u, 10.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 1 && p.paused, "pause: one toggle pauses", 10.0);
+		expect(&failures, drive_cycle_pause_time(&p, 10.0) == 10.0 &&
+		       drive_cycle_pause_time(&p, 14.5) == 10.0, "pause: cycle time holds", 14.5);
+		drive_cycle_state(drive_cycle_pause_time(&p, 10.0), &held);
+		drive_cycle_state(drive_cycle_pause_time(&p, 14.5), &now);
+		expect(&failures, held.speed_kmh == now.speed_kmh && held.rpm == now.rpm &&
+		       held.telltales == now.telltales, "pause: state holds", 14.5);
+
+		/* Resume at 15 s: continues from 10 s, no jump */
+		req = (struct drive_cycle_toggles){ 1u, 15.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 1 && !p.paused, "resume: one toggle resumes", 15.0);
+		expect(&failures, drive_cycle_pause_time(&p, 15.0) == 10.0, "resume: no jump", 15.0);
+		expect(&failures, drive_cycle_pause_time(&p, 16.0) == 11.0,
+		       "resume: cycle advances after resume", 16.0);
+
+		/* Two toggles in one frame: nothing changes; none: nothing; three: one */
+		req = (struct drive_cycle_toggles){ 2u, 20.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 0 && !p.paused &&
+		       drive_cycle_pause_time(&p, 20.0) == 15.0, "double toggle: no change", 20.0);
+		req = (struct drive_cycle_toggles){ 0u, 21.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 0 && !p.paused, "no toggle: no change", 21.0);
+		req = (struct drive_cycle_toggles){ 3u, 22.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 1 && p.paused &&
+		       drive_cycle_pause_time(&p, 30.0) == 17.0, "three toggles: one toggle", 30.0);
+
+		/* Pause at t = 0: the bulb check holds; resume continues from 0 */
+		drive_cycle_pause_init(&p);
+		req = (struct drive_cycle_toggles){ 1u, 0.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 1 && drive_cycle_pause_time(&p, 3.0) == 0.0,
+		       "pause at 0: holds at 0", 3.0);
+		drive_cycle_state(drive_cycle_pause_time(&p, 3.0), &now);
+		expect(&failures, (now.telltales & TT_ALL) == TT_ALL, "pause at 0: bulb check held",
+		       3.0);
+		req = (struct drive_cycle_toggles){ 1u, 3.0 };
+		changed = drive_cycle_pause_apply(&p, req);
+		expect(&failures, changed == 1 && drive_cycle_pause_time(&p, 4.0) == 1.0,
+		       "pause at 0: resume from 0", 4.0);
+		printf("pause: pause, resume, double toggle, pause at t=0 checked\n");
 	}
 
 	printf("%s (%d failures)\n", failures ? "T1 FAIL" : "T1 PASS", failures);
