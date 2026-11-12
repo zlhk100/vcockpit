@@ -109,67 +109,79 @@ void drive_cycle_state(double t, struct gauge_state *s)
 #ifdef DRIVE_CYCLE_HOST_TEST
 #include <stdio.h>
 
-static int failures;
+/* Expected state at one time: speed band and telltale bits. */
+struct expected {
+	double t;
+	float v_lo, v_hi;
+	unsigned on, off;
+};
 
-static void expect(int cond, const char *what, double t)
+static void expect(int *failures, int cond, const char *what, double t)
 {
 	if (!cond) {
 		printf("FAIL t=%.2f: %s\n", t, what);
-		failures++;
+		(*failures)++;
 	}
 }
 
-static void check_point(double t, float v_lo, float v_hi, unsigned on, unsigned off)
+static void check_point(int *failures, struct expected e)
 {
 	struct gauge_state s;
 
-	drive_cycle_state(t, &s);
-	expect(s.speed_kmh >= v_lo && s.speed_kmh <= v_hi, "speed band", t);
-	expect((s.telltales & on) == on, "telltales expected on", t);
-	expect((s.telltales & off) == 0, "telltales expected off", t);
+	drive_cycle_state(e.t, &s);
+	expect(failures, s.speed_kmh >= e.v_lo && s.speed_kmh <= e.v_hi, "speed band", e.t);
+	expect(failures, (s.telltales & e.on) == e.on, "telltales expected on", e.t);
+	expect(failures, (s.telltales & e.off) == 0, "telltales expected off", e.t);
 	printf("t=%6.2f speed=%6.1f rpm=%6.0f telltales=0x%02x\n",
-	       t, s.speed_kmh, s.rpm, s.telltales);
+	       e.t, (double)s.speed_kmh, (double)s.rpm, s.telltales);
 }
+
+static const struct expected points[] = {
+	/* Bulb check, seat belt, idle */
+	{  0.0,   0.0f,   0.0f, TT_ALL, 0 },
+	{  1.9,   0.0f,   0.0f, TT_ALL, 0 },
+	{  3.0,   0.0f,   0.0f, TT_SEATBELT,
+	   TT_CHECK_ENGINE | TT_TURN_LEFT | TT_TURN_RIGHT | TT_HIGH_BEAM },
+	{  6.0,   0.0f,  20.0f, 0, TT_ALL },
+	/* Accelerate, cruise */
+	{ 10.0,  40.0f,  60.0f, 0, TT_ALL },
+	{ 20.0, 100.0f, 100.0f, 0, TT_ALL },
+	/* Left turn: blinker on in the first half period, off in the second */
+	{ 25.1,  60.0f, 100.0f, TT_TURN_LEFT, TT_TURN_RIGHT | TT_HIGH_BEAM },
+	{ 25.5,  60.0f, 100.0f, 0, TT_TURN_LEFT | TT_TURN_RIGHT },
+	/* Brake */
+	{ 35.0,  20.0f,  60.0f, 0, TT_ALL },
+	/* Right turn */
+	{ 38.1,  20.0f,  40.0f, TT_TURN_RIGHT, TT_TURN_LEFT },
+	/* Night: high beam */
+	{ 50.0,  40.0f,  80.0f, TT_HIGH_BEAM, TT_TURN_LEFT | TT_TURN_RIGHT },
+	{ 55.0,  80.0f,  80.0f, TT_HIGH_BEAM, 0 },
+	{ 58.5,   0.0f,  80.0f, 0, TT_ALL },
+	/* Second loop: no bulb check, no seat belt */
+	{ 61.0,   0.0f,   0.0f, 0, TT_ALL },
+	{ 80.0, 100.0f, 100.0f, 0, TT_ALL },
+};
 
 int main(void)
 {
 	struct gauge_state a, b;
+	int failures = 0;
+	size_t i;
 	double t;
 
-	/* Bulb check, seat belt, idle */
-	check_point(0.0, 0.0f, 0.0f, TT_ALL, 0);
-	check_point(1.9, 0.0f, 0.0f, TT_ALL, 0);
-	check_point(3.0, 0.0f, 0.0f, TT_SEATBELT,
-		    TT_CHECK_ENGINE | TT_TURN_LEFT | TT_TURN_RIGHT | TT_HIGH_BEAM);
-	check_point(6.0, 0.0f, 20.0f, 0, TT_ALL);
-	/* Accelerate, cruise */
-	check_point(10.0, 40.0f, 60.0f, 0, TT_ALL);
-	check_point(20.0, 100.0f, 100.0f, 0, TT_ALL);
-	/* Left turn: blinker on in the first half period, off in the second */
-	check_point(25.1, 60.0f, 100.0f, TT_TURN_LEFT, TT_TURN_RIGHT | TT_HIGH_BEAM);
-	check_point(25.5, 60.0f, 100.0f, 0, TT_TURN_LEFT | TT_TURN_RIGHT);
-	/* Brake */
-	check_point(35.0, 20.0f, 60.0f, 0, TT_ALL);
-	/* Right turn */
-	check_point(38.1, 20.0f, 40.0f, TT_TURN_RIGHT, TT_TURN_LEFT);
-	/* Night: high beam */
-	check_point(50.0, 40.0f, 80.0f, TT_HIGH_BEAM, TT_TURN_LEFT | TT_TURN_RIGHT);
-	check_point(55.0, 80.0f, 80.0f, TT_HIGH_BEAM, 0);
-	check_point(58.5, 0.0f, 80.0f, 0, TT_ALL);
-	/* Second loop: no bulb check, no seat belt */
-	check_point(61.0, 0.0f, 0.0f, 0, TT_ALL);
-	check_point(80.0, 100.0f, 100.0f, 0, TT_ALL);
+	for (i = 0; i < sizeof(points) / sizeof(points[0]); i++)
+		check_point(&failures, points[i]);
 
 	/* Determinism and invariants over ten loops */
 	for (t = 0.0; t < 600.0; t += 0.01) {
 		drive_cycle_state(t, &a);
 		drive_cycle_state(t, &b);
-		expect(a.speed_kmh == b.speed_kmh && a.rpm == b.rpm &&
+		expect(&failures, a.speed_kmh == b.speed_kmh && a.rpm == b.rpm &&
 		       a.telltales == b.telltales, "deterministic", t);
-		expect(a.speed_kmh >= 0.0f && a.speed_kmh <= SPEED_MAX_KMH,
+		expect(&failures, a.speed_kmh >= 0.0f && a.speed_kmh <= SPEED_MAX_KMH,
 		       "0 <= speed <= 200", t);
-		expect(a.rpm >= 0.0f && a.rpm <= RPM_MAX, "0 <= rpm <= 7000", t);
-		expect((a.telltales & ~TT_ALL) == 0, "only defined bits", t);
+		expect(&failures, a.rpm >= 0.0f && a.rpm <= RPM_MAX, "0 <= rpm <= 7000", t);
+		expect(&failures, (a.telltales & ~TT_ALL) == 0, "only defined bits", t);
 		if (failures > 20)
 			break;
 	}

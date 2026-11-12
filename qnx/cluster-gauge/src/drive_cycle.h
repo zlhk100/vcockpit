@@ -27,7 +27,7 @@ struct gauge_state {
 };
 
 /* State at t seconds after start (t >= 0). The same t always gives the
- * same state. */
+ * same state. Cannot fail. */
 void drive_cycle_state(double t, struct gauge_state *s);
 
 #endif

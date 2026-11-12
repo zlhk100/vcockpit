@@ -7,3 +7,4 @@
 # A function-scope static is listed by its name without GCC's ".<n>" suffix.
 # check-static-storage.sh fails on any symbol not listed here and on any
 # entry that matches no symbol.
+renderer src/main.c struct renderer in main (block scope): keeps the 64 KB vertex buffer off the main thread's stack, created once before the frame loop, written only through the pointer main passes to render_*
