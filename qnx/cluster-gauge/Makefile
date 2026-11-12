@@ -31,19 +31,22 @@ endif
 VERSION := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 
 CFLAGS   := -std=c11 $(OPT) $(WARNINGS)
-CPPFLAGS := -D_QNX_SOURCE
+# Headers shared with telltale-monitor
+COMMON   := ../common
+
+CPPFLAGS := -D_QNX_SOURCE -I$(COMMON)
 LDLIBS   := -lscreen -lEGL -lGLESv2 -lm
 
 BUILD := build
 OBJ   := $(BUILD)/obj
 SRCS  := src/main.c src/render.c src/drive_cycle.c
-HDRS  := src/render.h src/drive_cycle.h
+HDRS  := src/render.h src/drive_cycle.h $(COMMON)/telltale_layout.h
 OBJS  := $(patsubst src/%.c,$(OBJ)/%.o,$(SRCS))
 BIN   := $(BUILD)/cluster-gauge
 VERSION_STAMP := $(BUILD)/version.stamp
 
 HOST_CC     ?= cc
-HOST_CFLAGS := -std=c11 -O2 $(WARNINGS)
+HOST_CFLAGS := -std=c11 -O2 $(WARNINGS) -I$(COMMON)
 HOST_TEST   := $(BUILD)/host/drive_cycle_test
 
 DESTDIR ?= $(BUILD)/stage
@@ -54,10 +57,10 @@ BINDIR  ?= /system/bin
 # the program's own code.
 ANALYSIS_DEFS := -D_QNX_SOURCE -D__QNX__=800 -D__QNXNTO__=1 -D__X86_64__=1 \
 		 -D__LITTLEENDIAN__=1 -D__unix__=1
-ANALYSIS_INC  := -isystem $(QNX_TARGET)/usr/include
+ANALYSIS_INC  := -I$(COMMON) -isystem $(QNX_TARGET)/usr/include
 CPPCHECK_FLAGS := --enable=warning,style,performance,portability --std=c11 \
 		  --error-exitcode=1 --library=posix \
-		  -D_QNX_SOURCE -D__QNX__=800 -D__QNXNTO__=1
+		  -D_QNX_SOURCE -D__QNX__=800 -D__QNXNTO__=1 -I$(COMMON)
 CLANG_TIDY_CHECKS := -*,cert-*,bugprone-*
 
 .PHONY: all objs check host-test install clean FORCE
@@ -86,7 +89,7 @@ $(OBJ) $(BUILD):
 host-test: $(HOST_TEST)
 	./$(HOST_TEST)
 
-$(HOST_TEST): src/drive_cycle.c src/drive_cycle.h
+$(HOST_TEST): src/drive_cycle.c src/drive_cycle.h $(COMMON)/telltale_layout.h
 	mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_CFLAGS) -DDRIVE_CYCLE_HOST_TEST -o $@ src/drive_cycle.c -lm
 

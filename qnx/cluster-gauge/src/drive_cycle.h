@@ -7,14 +7,8 @@
 #ifndef CLUSTER_GAUGE_DRIVE_CYCLE_H
 #define CLUSTER_GAUGE_DRIVE_CYCLE_H
 
-/* Telltale bits */
-#define TT_TURN_LEFT     (1u << 0)
-#define TT_TURN_RIGHT    (1u << 1)
-#define TT_SEATBELT      (1u << 2)
-#define TT_HIGH_BEAM     (1u << 3)
-#define TT_CHECK_ENGINE  (1u << 4)
-#define TT_ALL           (TT_TURN_LEFT | TT_TURN_RIGHT | TT_SEATBELT | \
-			  TT_HIGH_BEAM | TT_CHECK_ENGINE)
+/* Telltale bits TT_* (shared with telltale-monitor) */
+#include "telltale_layout.h"
 
 #define DRIVE_CYCLE_PERIOD_S  60.0
 #define SPEED_MAX_KMH        200.0f

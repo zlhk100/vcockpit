@@ -42,9 +42,6 @@
 #define RPM_REDLINE  6000.0f
 #define RPM_TICKS     7
 
-/* Telltale row */
-#define TT_Y           70.0f
-
 struct rgba { float r, g, b, a; };
 struct vec2 { float x, y; };
 struct box { float x, y, w, h; };
@@ -57,9 +54,10 @@ struct arc { float r_in, r_out, a0, a1; };
 /* A seven-segment cell: its box and the segment thickness. */
 struct seven_seg { struct box box; float t; };
 
+/* Colours of everything but the telltales; those are in telltale_layout.h. */
 enum colour {
 	COL_TRACK, COL_ARC, COL_TICK, COL_NEEDLE, COL_HUB, COL_SEG_ON, COL_SEG_OFF,
-	COL_RPM, COL_RED, COL_TT_OFF, COL_GREEN, COL_WARN, COL_BLUE, COL_AMBER,
+	COL_RPM, COL_RED,
 	COL_COUNT
 };
 
@@ -73,29 +71,7 @@ static const struct rgba palette[COL_COUNT] = {
 	[COL_SEG_OFF] = { 0.08f, 0.09f, 0.11f, 1.0f },
 	[COL_RPM]     = { 0.95f, 0.80f, 0.20f, 1.0f },
 	[COL_RED]     = { 0.45f, 0.06f, 0.06f, 1.0f },
-	[COL_TT_OFF]  = { 0.10f, 0.11f, 0.13f, 1.0f },
-	[COL_GREEN]   = { 0.15f, 0.85f, 0.25f, 1.0f },
-	[COL_WARN]    = { 0.95f, 0.15f, 0.12f, 1.0f },
-	[COL_BLUE]    = { 0.20f, 0.45f, 1.00f, 1.0f },
-	[COL_AMBER]   = { 1.00f, 0.65f, 0.05f, 1.0f },
 };
-
-/* Telltale row, left to right: which bit, where, colour when on. */
-struct telltale_layout {
-	unsigned bit;
-	float x;
-	enum colour col;
-};
-
-static const struct telltale_layout telltale_row[] = {
-	{ TT_TURN_LEFT,     100.0f, COL_GREEN },
-	{ TT_SEATBELT,      470.0f, COL_WARN },
-	{ TT_HIGH_BEAM,     640.0f, COL_BLUE },
-	{ TT_CHECK_ENGINE,  810.0f, COL_AMBER },
-	{ TT_TURN_RIGHT,   1180.0f, COL_GREEN },
-};
-
-#define N_TELLTALES (sizeof(telltale_row) / sizeof(telltale_row[0]))
 
 /* Seven-segment digits, bits a..g = 0..6 */
 static const unsigned char seg_digits[10] = {
@@ -192,17 +168,31 @@ static void line(struct renderer *r, struct seg s, float w)
 	}
 }
 
-/* Draw the vertices collected since the last draw in colour c. */
-static void draw(struct renderer *r, enum colour c)
+/* Draw the vertices collected since the last draw in colour p. */
+static void draw_rgba(struct renderer *r, const struct rgba *p)
 {
-	const struct rgba *p = &palette[c];
-
 	if (r->nverts == 0)
 		return;
 	glUniform4f(r->loc_color, p->r, p->g, p->b, p->a);
 	glVertexAttribPointer((GLuint)r->loc_pos, 2, GL_FLOAT, GL_FALSE, 0, r->verts);
 	glDrawArrays(GL_TRIANGLES, 0, (GLsizei)r->nverts);
 	r->nverts = 0;
+}
+
+/* Draw in palette colour c. */
+static void draw(struct renderer *r, enum colour c)
+{
+	draw_rgba(r, &palette[c]);
+}
+
+/* Draw in a telltale colour (8 bits per channel, opaque). */
+static void draw_telltale(struct renderer *r, struct telltale_rgb c)
+{
+	const struct rgba p = {
+		(float)c.r / 255.0f, (float)c.g / 255.0f, (float)c.b / 255.0f, 1.0f
+	};
+
+	draw_rgba(r, &p);
 }
 
 /* ---- seven-segment digits ---- */
@@ -307,9 +297,9 @@ static void telltales(struct renderer *r, unsigned bits)
 {
 	size_t i;
 
-	for (i = 0; i < N_TELLTALES; i++) {
-		const struct telltale_layout *tt = &telltale_row[i];
-		const struct vec2 c = { tt->x, TT_Y };
+	for (i = 0; i < TELLTALE_COUNT; i++) {
+		const struct telltale_def *tt = &telltale_table[i];
+		const struct vec2 c = { tt->box.x + tt->box.w * 0.5f, tt->box.y + tt->box.h * 0.5f };
 
 		switch (tt->bit) {
 		case TT_TURN_LEFT:
@@ -328,7 +318,7 @@ static void telltales(struct renderer *r, unsigned bits)
 			engine(r, c);
 			break;
 		}
-		draw(r, (bits & tt->bit) ? tt->col : COL_TT_OFF);
+		draw_telltale(r, (bits & tt->bit) ? tt->on : telltale_off);
 		if (tt->bit == TT_SEATBELT) {
 			seatbelt_strap(r, c);
 			draw(r, COL_SEG_OFF);
