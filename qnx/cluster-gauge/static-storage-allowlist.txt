@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Lei Zhou
+#
+# Static-storage allowlist (coding standard CS-STATE-1).
+# Mutable objects with static storage duration that the program may have.
+# One line per symbol: <symbol> <file> <reason>
+# A function-scope static is listed by its name without GCC's ".<n>" suffix.
+# check-static-storage.sh fails on any symbol not listed here and on any
+# entry that matches no symbol.
