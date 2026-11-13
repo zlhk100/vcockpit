@@ -35,3 +35,23 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 2G \
 SSH is forwarded to `127.0.0.1:2222` only. `cloud-localds` is in the
 `cloud-image-utils` package. This preparation sequence has not yet been
 run end to end from a fresh image.
+
+## Autostart for the launcher
+
+`runbooks/vcockpit.sh` never logs into the guest. It boots
+`vms/vcockpit-debian.qcow2` (or wherever `DEBIAN_DISK` points), an overlay
+over the prepared image in which `vcockpit-demo.service` starts Xorg and
+`glxgears -geometry 1920x1080+0+0` at boot. The overlay leaves the
+prepared image untouched. Create it and install the unit once:
+
+```bash
+qemu-img create -f qcow2 -b "$PWD/vms/debian-ivi-guest.qcow2" -F qcow2 \
+    vms/vcockpit-debian.qcow2
+# boot vms/vcockpit-debian.qcow2 without -snapshot, with SSH forwarded to 127.0.0.1:2222, then:
+scp -P 2222 guest/debian/vcockpit-demo.service debian@127.0.0.1:/tmp/
+ssh -p 2222 debian@127.0.0.1 'sudo install -m 644 -o root -g root /tmp/vcockpit-demo.service /etc/systemd/system/vcockpit-demo.service &&
+    sudo systemctl daemon-reload && sudo systemctl enable vcockpit-demo.service && sudo poweroff'
+```
+
+The unit runs as `debian` and starts Xorg through that user's
+passwordless sudo, as the manual steps do.

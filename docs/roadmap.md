@@ -25,11 +25,11 @@ Copyright (C) 2026 Lei Zhou
   have keyboard focus and each proxy sends keys only while the pointer is
   on its surface, so the keyboard follows the pointer
   ([running the proxy](running-the-proxy.md#7-two-guests-side-by-side)).
-
-## Next: finish the proxy
-
-- **Launch script.** One script for compositor, guest, proxy and layer
-  placement, checking each step, verified on three consecutive clean runs.
+- Launch script: `runbooks/vcockpit.sh start | stop | status` brings the
+  whole cockpit up and down, checking each step, with a log directory per
+  run; verified on three consecutive clean runs. The guests start their
+  content at boot from overlay disks
+  ([running the proxy](running-the-proxy.md#quick-start)).
 
 ## Known issues
 
@@ -47,8 +47,6 @@ Copyright (C) 2026 Lei Zhou
 - Keyboard focus is lost when the compositor's window loses focus on the
   host desktop and is not restored when it regains it;
   `runbooks/keyboard-focus-watch.sh` re-applies it as a workaround.
-- Copies of the proxy's cursor can stay on screen where the pointer has
-  been; the cause is not established.
 - The Debian picture stopped updating once after about three minutes; it
   has not recurred since. See
   [running the proxy](running-the-proxy.md#known-issues).

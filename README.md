@@ -22,8 +22,9 @@ a fixed zone of the dashboard with an explicit stacking order.
 > **Status: work in progress.** A QNX guest and a Debian guest render live
 > side by side in the host compositor, each through its own D-Bus proxy,
 > and the proxies forward keyboard and mouse input to the guest under the
-> pointer. There is no verified launch script yet; the steps are in
-> [docs/running-the-proxy.md](docs/running-the-proxy.md). See
+> pointer. One script, `runbooks/vcockpit.sh`, starts and stops the whole
+> cockpit; the guests start their content at boot. See
+> [docs/running-the-proxy.md](docs/running-the-proxy.md#quick-start) and
 > [docs/roadmap.md](docs/roadmap.md).
 
 ## How it works
@@ -59,7 +60,7 @@ does not take the hypervisor down with it.
 |---|---|
 | [`proxy/`](proxy/) | `automotive-dbus-proxy`: QEMU D-Bus display listener to Wayland surface bridge (C, Meson) |
 | [`compositor/`](compositor/) | Container image for the host compositor: Weston 10 with the COVESA IVI extension 2.3.1, plus `ivi-input-set` for input focus |
-| [`runbooks/`](runbooks/) | `qnx-probe-launch.sh`: QNX and Debian side by side through QEMU's SDL display (the reference path the proxy replaces) |
+| [`runbooks/`](runbooks/) | `vcockpit.sh`: start, stop and check the whole cockpit through the proxies; `keyboard-focus-watch.sh`: keyboard focus after host focus changes; `qnx-probe-launch.sh`: QNX and Debian side by side through QEMU's SDL display (the reference path the proxy replaces) |
 | [`guest/debian/`](guest/debian/) | cloud-init template for the Debian test guest |
 | [`qnx/`](qnx/) | Programs for the QNX guest: [`cluster-gauge`](qnx/cluster-gauge/), an instrument cluster drawn with Screen and OpenGL ES 2 (C, QNX SDP 8.0) |
 | [`qnx/telltale-monitor/`](qnx/telltale-monitor/) | `telltale-monitor`: checks the telltales on the composed display against the state the gauge commands, and shows a warning on a mismatch (C, QNX SDP 8.0) |

@@ -8,9 +8,40 @@ Copyright (C) 2026 Lei Zhou
 These are the manual steps that put a QNX guest on screen through
 `automotive-dbus-proxy`, and a Debian guest next to it through a second
 proxy ([section 7](#7-two-guests-side-by-side)). They have been run on
-the tested setup described in the [README](../README.md); a launch
-script that runs them in order
-and checks each step is on the [roadmap](roadmap.md).
+the tested setup described in the [README](../README.md). The quick
+start below runs all of them with one script.
+
+## Quick start
+
+`runbooks/vcockpit.sh` starts the whole cockpit: the compositor and its
+background, both guests with their own buses, both proxies, the
+placement of the two zones and keyboard focus. It needs guest disks
+whose content starts at boot (see [the QNX guest](qnx-guest.md#autostart-overlay)
+and [the Debian guest](../guest/debian/README.md#autostart-for-the-launcher)),
+the compositor image, and the proxy built in `proxy/build`:
+
+```bash
+meson setup proxy/build proxy && ninja -C proxy/build
+runbooks/vcockpit.sh start
+runbooks/vcockpit.sh status
+runbooks/vcockpit.sh stop
+```
+
+`start` waits for each step, places the surfaces once each guest shows its
+final display size, checks that both surfaces receive frames and prints
+its run directory. If a step fails it stops what it started and exits
+non-zero; it refuses to start while a session is running. The gauge
+appears about a minute after start, once QNX has booted. `stop` stops
+only the processes the run recorded. `runbooks/vcockpit.sh --help` lists
+the settings (QEMU, proxy, guest disks, output size, run directory) and
+their defaults. The guest disks are opened with `-snapshot`, so a run
+never changes them.
+
+Each run keeps its logs in its own directory, by default under
+`~/.local/state/vcockpit/runs/`: one log per process, the launcher's
+log, the recorded process IDs and a status snapshot.
+
+The rest of this page is the same sequence done by hand.
 
 Start from a clean compositor container. IVI surface and layer state left
 over from an earlier proxy run makes `set screen 0 render order` fail

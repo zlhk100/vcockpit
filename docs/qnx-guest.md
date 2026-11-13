@@ -74,6 +74,53 @@ desktop, the launcher and each application window to separate ones.
 `virtio-gpu-gl-pci`, unlike `virtio-vga-gl`, has no legacy VGA mode to fall
 back to.
 
+## Autostart overlay
+
+`runbooks/vcockpit.sh` never logs into the guest: the cluster gauge and
+its telltale monitor start at boot from an overlay disk,
+`output/vcockpit-qnx.qcow2`, whose backing file is `disk-qemu`. QEMU opens
+the backing file read-only, so `disk-qemu` itself is never written.
+
+```bash
+qemu-img create -f qcow2 -b "$QNX_DIR/output/disk-qemu" -F raw \
+    "$QNX_DIR/output/vcockpit-qnx.qcow2"
+```
+
+The overlay was prepared once by booting it without `-snapshot`, with the
+`-drive` line pointing at the overlay (`format=qcow2`) and the serial
+console on a unix socket, and, as root on that console:
+
+1. Copying `qnx/cluster-gauge/build/cluster-gauge` and
+   `qnx/telltale-monitor/build/telltale-monitor` (default builds) to
+   `/system/bin/` (`/system` is `/usr`, a writable qnx6 partition).
+2. Copying `/system/etc/startup/post_startup.sh` to `post_startup.sh.orig`.
+3. Adding these lines to `post_startup.sh`, just before its final
+   `exit 0`:
+
+   ```sh
+   # vcockpit: start the cluster gauge and its telltale monitor once the window
+   # manager's launcher (started after this script) is up, so that the gauge is
+   # the foreground window
+   (
+       i=0
+       while [ $i -lt 60 ] && ! pidin -f an | grep -q demolauncher; do sleep 1; i=$((i+1)); done
+       sleep 10
+       /system/bin/cluster-gauge > /tmp/cluster-gauge.log 2>&1 &
+       sleep 2
+       /system/bin/telltale-monitor > /tmp/telltale-monitor.log 2>&1 &
+   ) &
+   ```
+
+4. `sync; shutdown -b`, then stopping QEMU (SIGTERM) once the console has
+   gone quiet. QNX `shutdown` without `-b` reboots, and the halted guest
+   does not power off.
+
+The window manager and the launcher are started by `full_startup.sh`,
+after `post_startup.sh`. A gauge started directly from `post_startup.sh`
+ends up behind the launcher, and the monitor then reports every
+commanded telltale as not displayed; hence the wait for the launcher.
+Both programs log to `/tmp` in the guest.
+
 ## Limits of this image
 
 The QSTI image ships the older `gpu_virtio` graphics stack, which composes
