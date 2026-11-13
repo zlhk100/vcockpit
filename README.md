@@ -19,10 +19,12 @@ dma-buf file descriptors, a small proxy process hands them to a host
 compositor as Wayland surfaces, and the compositor places each surface in
 a fixed zone of the dashboard with an explicit stacking order.
 
-> **Status: work in progress.** A QNX guest renders live into the host
-> compositor through the D-Bus proxy. Keyboard and mouse input are not yet
-> forwarded through the proxy, and the proxy has no verified launch script
-> yet. See [docs/roadmap.md](docs/roadmap.md).
+> **Status: work in progress.** A QNX guest and a Debian guest render live
+> side by side in the host compositor, each through its own D-Bus proxy,
+> and the proxies forward keyboard and mouse input to the guest under the
+> pointer. There is no verified launch script yet; the steps are in
+> [docs/running-the-proxy.md](docs/running-the-proxy.md). See
+> [docs/roadmap.md](docs/roadmap.md).
 
 ## How it works
 

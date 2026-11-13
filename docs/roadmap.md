@@ -17,13 +17,17 @@ Copyright (C) 2026 Lei Zhou
 - Proxy clean shutdown: SIGINT and SIGTERM end the GLib main loop
   (`g_unix_signal_add`); the proxy closes its D-Bus connections and
   removes its surface from the compositor before it exits.
+- Input forwarding: the proxy passes `wl_pointer` and `wl_keyboard` events
+  to QEMU through `org.qemu.Display1.Mouse` and `org.qemu.Display1.Keyboard`,
+  and draws its own pointer cursor.
+- Two guests side by side: a Debian guest next to the QNX guest, each with
+  its own QEMU, D-Bus bus and proxy, in two scaled zones. Both surfaces
+  have keyboard focus and each proxy sends keys only while the pointer is
+  on its surface, so the keyboard follows the pointer
+  ([running the proxy](running-the-proxy.md#7-two-guests-side-by-side)).
 
 ## Next: finish the proxy
 
-- **Automatic keyboard focus.** On `wl_pointer` enter and leave, move
-  keyboard focus to the surface under the pointer.
-- **Input forwarding.** Pass `wl_keyboard` and `wl_pointer` events to QEMU
-  through `org.qemu.Display1.Keyboard` and `org.qemu.Display1.Mouse`.
 - **Launch script.** One script for compositor, guest, proxy and layer
   placement, checking each step, verified on three consecutive clean runs.
 
@@ -40,6 +44,14 @@ Copyright (C) 2026 Lei Zhou
   guest frame arrives; it is not needed once QEMU delivers frames.
 - The proxy uses console 0 for every scanout; more than one console per VM
   needs per-console state in the D-Bus listener.
+- Keyboard focus is lost when the compositor's window loses focus on the
+  host desktop and is not restored when it regains it;
+  `runbooks/keyboard-focus-watch.sh` re-applies it as a workaround.
+- Copies of the proxy's cursor can stay on screen where the pointer has
+  been; the cause is not established.
+- The Debian picture stopped updating once after about three minutes; it
+  has not recurred since. See
+  [running the proxy](running-the-proxy.md#known-issues).
 
 ## Later
 

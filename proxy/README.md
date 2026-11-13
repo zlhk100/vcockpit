@@ -54,10 +54,18 @@ surface are forwarded to QEMU's `org.qemu.Display1.Mouse` and
 `org.qemu.Display1.Keyboard` interfaces on the console that feeds the
 surface: positions (absolute or relative, following QEMU's `IsAbsolute`),
 buttons, the vertical wheel, and keys as QEMU key numbers from a fixed
-table; keys not in the table are dropped and counted. Held buttons and
-keys are released when focus leaves the surface and at shutdown, which
-prints the input counters. Keyboard focus is given by the compositor
-(`ivi-input-set`, see [running the proxy](../docs/running-the-proxy.md#6-input)).
+table; keys not in the table are dropped and counted. A key is sent only
+while the pointer is on the proxy's surface; keys arriving while the
+pointer is elsewhere are not sent and are counted as gated keys, so with
+keyboard focus on several surfaces the keyboard follows the pointer. Held
+buttons and keys are released when the pointer or keyboard leaves the
+surface and at shutdown, which prints the input counters. Keyboard focus
+is given by the compositor (`ivi-input-set`, see
+[running the proxy](../docs/running-the-proxy.md#6-input)).
+
+Neither guest's cursor reaches the host, so the proxy sets its own cursor
+on pointer enter: a 16x24 arrow, white with a black outline, hotspot at
+its tip, drawn once at start-up into a `wl_shm` buffer.
 
 ## Source
 

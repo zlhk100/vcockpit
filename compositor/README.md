@@ -18,7 +18,9 @@ docker build -t automotive-dash-platform:latest .
 The image also contains `/usr/local/bin/ivi-input-set`, built from
 `ivi-input-set.c`: `ivi-input-set <surface-id>` gives keyboard focus to
 that surface and lets surfaces 1000 and 2000 accept pointer and touch
-input.
+input; `ivi-input-set all` gives keyboard and pointer focus to both
+surfaces, for two guests side by side (see
+[running the proxy](../docs/running-the-proxy.md#7-two-guests-side-by-side)).
 
 At run time, mount a `weston.ini` that maps window titles to IVI surface
 IDs over `/etc/xdg/weston/weston.ini`; see

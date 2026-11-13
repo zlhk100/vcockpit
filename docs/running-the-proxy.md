@@ -6,8 +6,10 @@ Copyright (C) 2026 Lei Zhou
 # Running the proxy
 
 These are the manual steps that put a QNX guest on screen through
-`automotive-dbus-proxy`. They have been run on the tested setup described
-in the [README](../README.md); a launch script that runs them in order
+`automotive-dbus-proxy`, and a Debian guest next to it through a second
+proxy ([section 7](#7-two-guests-side-by-side)). They have been run on
+the tested setup described in the [README](../README.md); a launch
+script that runs them in order
 and checks each step is on the [roadmap](roadmap.md).
 
 Start from a clean compositor container. IVI surface and layer state left
@@ -201,6 +203,210 @@ Every button press is logged with the guest position:
 Input: Console_0 button 0 press at (717,449)
 ```
 
+The proxy draws its own pointer cursor, a small white arrow, while the
+pointer is over its surface; the guest's cursor does not reach the host.
+
+The proxy sends a key only while the pointer is on its surface. Keys typed
+with the pointer elsewhere are not sent; they are counted as gated keys.
+Keys still held when the pointer leaves the surface are released in the
+guest. With one guest, keep the pointer over its surface while typing.
+
+## 7. Two guests side by side
+
+A Debian guest runs next to the QNX guest through its own QEMU, its own
+D-Bus bus and its own proxy. Each QEMU with `-display dbus` takes the name
+`org.qemu` on its bus, and a second QEMU on the same bus would wait behind
+the first, so each guest gets a private bus.
+
+### Compositor
+
+As section 1, with the output mode equal to the size of the compositor's
+window on your desktop. Output pixels outside the window are never shown.
+On the tested setup `mode=3840x1080` gave a window 2880 pixels wide, so
+the right-hand part of the output was off screen; with
+
+```ini
+[output]
+name=X1
+mode=2880x1080
+```
+
+the window is 2880x1080 and shows the whole output. Check the window size
+after the compositor starts:
+
+```bash
+xwininfo -root -tree | grep 'Weston Compositor'
+```
+
+### Buses
+
+Start each bus before its QEMU:
+
+```bash
+dbus-daemon --session --address=unix:path=/tmp/vcockpit-bus-qnx --nofork --print-address &
+dbus-daemon --session --address=unix:path=/tmp/vcockpit-bus-debian --nofork --print-address &
+```
+
+### Guests
+
+QNX: the command in section 2, run with
+`DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/vcockpit-bus-qnx` and with the
+display option changed to
+
+```
+-display dbus,gl=on,addr=unix:path=/tmp/vcockpit-bus-qnx
+```
+
+Debian: the guest image prepared as in
+[guest/debian/README.md](../guest/debian/README.md), at `$DEBIAN_IMAGE`.
+`-snapshot` discards everything the guest writes to its disk.
+
+```bash
+DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/vcockpit-bus-debian \
+"${QEMU_BIN:-qemu-system-x86_64}" \
+    -name qemu-debian \
+    -machine q35,accel=kvm,memory-backend=mem -cpu host -smp 2 -m 2G \
+    -object memory-backend-memfd,id=mem,size=2G,share=on \
+    -drive file=$DEBIAN_IMAGE,if=virtio,format=qcow2 -snapshot \
+    -vga none -display dbus,gl=on,addr=unix:path=/tmp/vcockpit-bus-debian \
+    -device virtio-vga-gl,edid=on,xres=1920,yres=1080 \
+    -netdev user,id=net0,hostfwd=tcp:127.0.0.1:2222-:22 \
+    -device virtio-net-pci,netdev=net0 > /tmp/qemu-debian.log 2>&1 &
+```
+
+Each bus should list `org.qemu`, and each QEMU should report one console:
+
+```bash
+for g in qnx debian; do
+    gdbus call --address unix:path=/tmp/vcockpit-bus-$g -d org.qemu \
+        -o /org/qemu/Display1/VM -m org.freedesktop.DBus.Properties.Get \
+        org.qemu.Display1.VM ConsoleIDs
+done
+```
+
+Once the Debian guest answers on SSH, start Xorg and a GL client in it:
+
+```bash
+ssh -p 2222 debian@127.0.0.1 'nohup sudo Xorg :0 -ac -noreset -nolisten tcp > /tmp/xorg.log 2>&1 &'
+ssh -p 2222 debian@127.0.0.1 'DISPLAY=:0 nohup glxgears -geometry 1920x1080+0+0 > /tmp/glxgears.log 2>&1 &'
+```
+
+### Proxies
+
+One proxy per guest, each on its guest's bus:
+
+```bash
+export XDG_RUNTIME_DIR=/tmp/weston-shared
+export WAYLAND_DISPLAY=wayland-1
+DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/vcockpit-bus-qnx \
+    build/automotive-dbus-proxy --vm-name qnx --wayland-socket wayland-1 --n-scanouts 1 &
+DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/vcockpit-bus-debian \
+    build/automotive-dbus-proxy --vm-name debian --wayland-socket wayland-1 --n-scanouts 1 &
+```
+
+The compositor maps `QEMU (qemu-debian-0)` to surface 2000 and
+`QEMU (qemu-qnx-0)` to surface 1000. The Debian proxy logs
+`ScanoutDMABUF: scanout=0 1920x1080`.
+
+### Placement
+
+Two equal 16:9 zones, side by side and vertically centred in the
+2880x1080 output. Each guest picture is scaled to its zone:
+
+| Guest | Surface | Source region | Destination region | Scale |
+|---|---|---|---|---|
+| Debian 1920x1080 | 2000 | 0 0 1920 1080 | 0 135 1440 810 | 0.75 |
+| QNX 1280x720 | 1000 | 0 0 1280 720 | 1440 135 1440 810 | 1.125 |
+
+```bash
+docker exec dash-test bash -c '
+    export XDG_RUNTIME_DIR=/tmp/weston-runtime
+    export WAYLAND_DISPLAY=wayland-1
+    LayerManagerControl create layer 2000 2880 1080
+    LayerManagerControl add surface 2000 to layer 2000
+    LayerManagerControl set surface 2000 source region 0 0 1920 1080
+    LayerManagerControl set surface 2000 destination region 0 135 1440 810
+    LayerManagerControl set layer 2000 source region 0 0 2880 1080
+    LayerManagerControl set layer 2000 destination region 0 0 2880 1080
+    LayerManagerControl set layer 2000 visibility 1
+    LayerManagerControl set surface 2000 visibility 1
+    LayerManagerControl create layer 1000 2880 1080
+    LayerManagerControl add surface 1000 to layer 1000
+    LayerManagerControl set surface 1000 source region 0 0 1280 720
+    LayerManagerControl set surface 1000 destination region 1440 135 1440 810
+    LayerManagerControl set layer 1000 source region 0 0 2880 1080
+    LayerManagerControl set layer 1000 destination region 0 0 2880 1080
+    LayerManagerControl set layer 1000 visibility 1
+    LayerManagerControl set surface 1000 visibility 1
+    LayerManagerControl set screen 0 render order 2000,1000'
+```
+
+The proxies need no scale: pointer positions reach them in the guest's own
+pixels, and a click at a zone's corner arrives at the guest picture's
+corner.
+
+### Keyboard follows the pointer
+
+Give keyboard focus to both surfaces:
+
+```bash
+docker exec dash-test bash -c '
+    export XDG_RUNTIME_DIR=/tmp/weston-runtime
+    export WAYLAND_DISPLAY=wayland-1
+    ivi-input-set all'
+```
+
+The compositor then delivers every key to both proxies, and each proxy
+sends it to its guest only while the pointer is on its surface (section
+6). The keyboard therefore goes to the guest under the pointer; with the
+pointer on neither surface, keys reach no guest.
+
+`ivi-input-set all` exists in images built from this tree. With an older
+image, compile the tool in the running container and call it as
+`/tmp/ivi-input-set`:
+
+```bash
+docker cp compositor/ivi-input-set.c dash-test:/tmp/ivi-input-set.c
+docker exec dash-test sh -c 'gcc /tmp/ivi-input-set.c -I/usr/local/include -L/usr/local/lib \
+    -lilmCommon -lilmControl -lilmInput -Wl,-rpath,/usr/local/lib -o /tmp/ivi-input-set'
+```
+
+When the compositor's window loses focus on the host desktop, Weston
+cancels the keyboard grab and the IVI input controller drops keyboard
+focus from both surfaces; focusing the window again does not restore it.
+`runbooks/keyboard-focus-watch.sh` runs `ivi-input-set all` each time the
+window is focused again. It is a convenience for demos, not a fix in the
+compositor:
+
+```bash
+runbooks/keyboard-focus-watch.sh &
+# with a tool compiled as above:
+IVI_INPUT_SET=/tmp/ivi-input-set runbooks/keyboard-focus-watch.sh &
+```
+
+Without the watcher, run `ivi-input-set all` again after focusing the
+window.
+
+### Stop
+
+Stop each proxy with Ctrl+C or SIGTERM, then the two QEMUs, then the two
+bus daemons, then `docker stop dash-test`. Stopping one proxy does not
+stop the other surface's frames.
+
+### Known issues
+
+- glxgears draws a 16:9 window cut off at the top and bottom. The guest's
+  own picture shows the same cut, so it comes from the client, not from
+  placement.
+- Copies of the proxy's cursor can stay on screen where the pointer has
+  been, inside and next to the zones, after the pointer has moved on. The
+  cause is not established.
+- In one earlier run the Debian picture stopped updating after about three
+  minutes (glxgears fell from about 260 frames per second to almost none,
+  and surface 2000 received no more frames) with no error in the guest
+  kernel log. It has not recurred since: 20 minutes with Debian alone, and
+  more than 5 minutes with both guests and input.
+
 ## Stop
 
 Stop the proxy with Ctrl+C or SIGTERM. It closes its D-Bus connections,
@@ -208,12 +414,13 @@ removes its surface from the compositor and exits with status 0:
 
 ```
 Shutting down (SIGINT)...
-Input: 6436 motion, 138 button, 76 key calls; 0 unmapped keys; 0 call errors
+Input: 601 motion, 10 button, 14 key calls; 0 unmapped keys; 7 gated keys; 0 call errors
 Shut down: 1 surface(s) removed
 ```
 
 The `Input:` line counts the calls made to QEMU, the keys dropped because
-they have no QEMU key number, and the calls QEMU answered with an error.
+they have no QEMU key number, the keys not sent because the pointer was
+not on the surface, and the calls QEMU answered with an error.
 
 `LayerManagerControl get surfaces` no longer lists surface 1000 and the
 compositor keeps running. Then `docker stop dash-test`, then stop QEMU.
