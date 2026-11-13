@@ -205,17 +205,21 @@ static void set_key_held(WaylandState *ws, uint32_t q, bool held)
 		ws->held_keys[q / 32u] &= ~(1u << (q % 32u));
 }
 
-/* P3: release every key held in the guest. */
-static void release_keys(WaylandState *ws, int i)
+/* P3: release every key held in the guest. Returns the number of keys released. */
+static unsigned int release_keys(WaylandState *ws, int i)
 {
+	unsigned int released = 0;
+
 	for (uint32_t q = 0; q < N_KEY_WORDS * 32u; q++) {
 		if (key_held(ws, q)) {
 			qemu_call(ws, i, QEMU_KEYBOARD_IFACE, "Release", g_variant_new("(u)", q),
 				  true);
 			ws->sent_key++;
 			set_key_held(ws, q, false);
+			released++;
 		}
 	}
+	return released;
 }
 
 /*
@@ -270,6 +274,15 @@ static void pointer_leave(WaylandState *ws)
 	       ws->scanouts[i].last_x, ws->scanouts[i].last_y, ws->range_min_x,
 	       ws->range_max_x, ws->range_min_y, ws->range_max_y);
 	ws->pointer_focus = -1;
+
+	/* Keys follow the pointer: keys pressed while it was here are released now. */
+	if (ws->keyboard_focus >= 0) {
+		unsigned int released = release_keys(ws, ws->keyboard_focus);
+
+		if (released > 0)
+			printf("Input: pointer leave: released %u key(s) on Console_%d\n", released,
+			       ws->keyboard_focus);
+	}
 }
 
 static void pointer_motion(WaylandState *ws, wl_fixed_t sx, wl_fixed_t sy)
@@ -386,6 +399,16 @@ static void keyboard_key(WaylandState *ws, uint32_t key, uint32_t state)
 
 	if (q == 0u) {
 		ws->dropped_key_unmapped++;	/* P4 */
+		return;
+	}
+	/*
+	 * The compositor gives keyboard focus to every guest surface; a key is
+	 * sent only while the pointer is on this proxy's surface. A press while
+	 * the pointer is elsewhere is counted; a release then has nothing to
+	 * release (keys are released on pointer leave) and is dropped below.
+	 */
+	if (ws->pointer_focus < 0 && state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+		ws->gated_keys++;
 		return;
 	}
 	if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
@@ -591,7 +614,7 @@ void input_shutdown(WaylandState *ws)
 	if (ws->pointer_focus >= 0)
 		release_buttons(ws, ws->pointer_focus);
 	if (ws->keyboard_focus >= 0)
-		release_keys(ws, ws->keyboard_focus);
+		(void)release_keys(ws, ws->keyboard_focus);	/* count not needed at shutdown */
 
 	for (int i = 0; i < ws->n_scanouts; i++) {
 		if (ws->scanouts[i].props_sub_id && ws->session_bus)
@@ -621,7 +644,8 @@ void input_shutdown(WaylandState *ws)
 		}
 	}
 
-	printf("Input: %lu motion, %lu button, %lu key calls; %lu unmapped keys; %lu call errors\n",
+	printf("Input: %lu motion, %lu button, %lu key calls; %lu unmapped keys; %lu gated keys; "
+	       "%lu call errors\n",
 	       ws->sent_motion, ws->sent_button, ws->sent_key, ws->dropped_key_unmapped,
-	       ws->call_errors);
+	       ws->gated_keys, ws->call_errors);
 }

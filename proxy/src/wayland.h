@@ -72,6 +72,7 @@ typedef struct {
     int                               range_min_x, range_max_x, range_min_y, range_max_y;
     unsigned long                     sent_motion, sent_button, sent_key;
     unsigned long                     dropped_key_unmapped, call_errors;
+    unsigned long                     gated_keys;       /* key presses not sent: pointer elsewhere */
 
     char                              vm_name[32];
 } WaylandState;

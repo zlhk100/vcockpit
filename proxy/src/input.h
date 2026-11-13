@@ -28,7 +28,9 @@ void input_dbus_init(WaylandState *ws);
  * Release every button and key the proxy holds down in the guest, unsubscribe
  * from PropertiesChanged, destroy the keyboard, pointer and seat, flush the
  * session bus and print the counters line:
- *   Input: <m> motion, <b> button, <k> key calls; <u> unmapped keys; <e> call errors
+ *   Input: <m> motion, <b> button, <k> key calls; <u> unmapped keys; <g> gated keys;
+ *   <e> call errors
+ * (gated keys: key presses not sent because the pointer was not on a proxy surface)
  * Call before dbus_destroy(). Safe to call when no seat was bound.
  */
 void input_shutdown(WaylandState *ws);
