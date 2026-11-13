@@ -44,10 +44,13 @@ default-surface-id-max=200
 
 [output]
 name=X1
-mode=3840x1080
 ```
 
-Save it as `/tmp/weston-phase2.ini`, then:
+Save it as `/tmp/weston-phase2.ini`. The compositor's output size, which
+is also the size of its window on the host desktop, is set with
+`WESTON_WIDTH` and `WESTON_HEIGHT` (default 3840x1080), not in the ini.
+Choose a size your screen can show; the tested setup uses 2880x1080.
+Then:
 
 ```bash
 sudo mkdir -p /tmp/weston-shared
@@ -58,6 +61,7 @@ docker run --rm -d \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v /tmp/weston-phase2.ini:/etc/xdg/weston/weston.ini:ro \
     -e DISPLAY=$DISPLAY \
+    -e WESTON_WIDTH=2880 -e WESTON_HEIGHT=1080 \
     --device=/dev/dri/card1 \
     --device=/dev/dri/renderD128 \
     --name dash-test \
@@ -220,23 +224,19 @@ the first, so each guest gets a private bus.
 
 ### Compositor
 
-As section 1, with the output mode equal to the size of the compositor's
-window on your desktop. Output pixels outside the window are never shown.
-On the tested setup `mode=3840x1080` gave a window 2880 pixels wide, so
-the right-hand part of the output was off screen; with
-
-```ini
-[output]
-name=X1
-mode=2880x1080
-```
-
-the window is 2880x1080 and shows the whole output. Check the window size
-after the compositor starts:
+As section 1. The zones below assume `WESTON_WIDTH=2880` and
+`WESTON_HEIGHT=1080`. The size must fit on your screen: with the default
+3840x1080 on a 2880-pixel-wide screen the window was 2880 pixels wide and
+the right-hand part of the output was never shown. The size given on the
+command line overrides any `mode` in the ini's `[output]` section.
+Check the size after the compositor starts:
 
 ```bash
+docker logs dash-test 2>&1 | grep 'x11 output'
 xwininfo -root -tree | grep 'Weston Compositor'
 ```
+
+Both should report 2880x1080.
 
 ### Buses
 
@@ -399,8 +399,10 @@ stop the other surface's frames.
   own picture shows the same cut, so it comes from the client, not from
   placement.
 - Copies of the proxy's cursor can stay on screen where the pointer has
-  been, inside and next to the zones, after the pointer has moved on. The
-  cause is not established.
+  been, after the pointer has moved on: on the background around the
+  zones and in the Debian zone, but not in the QNX zone. They remain with
+  the output size equal to the window size (2880x1080). The cause is not
+  established.
 - In one earlier run the Debian picture stopped updating after about three
   minutes (glxgears fell from about 260 frames per second to almost none,
   and surface 2000 received no more frames) with no error in the guest

@@ -8,8 +8,11 @@ Copyright (C) 2026 Lei Zhou
 Debian 12 with Weston 10 and the
 [COVESA wayland-ivi-extension](https://github.com/COVESA/wayland-ivi-extension)
 2.3.1 (IVI controller, input controller, `ivi-id-agent`,
-`LayerManagerControl`), started with the x11 backend into a 3840x1080
-window on the host display.
+`LayerManagerControl`), started with the x11 backend into a window on the
+host display. The output, and the window, is `WESTON_WIDTH` by
+`WESTON_HEIGHT` pixels (environment variables, set with `docker run -e`;
+default 3840x1080). The size on Weston's command line overrides any
+`mode` in the mounted `weston.ini`.
 
 ```bash
 docker build -t automotive-dash-platform:latest .
