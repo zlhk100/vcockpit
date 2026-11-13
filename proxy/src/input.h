@@ -17,6 +17,15 @@ void input_bind_seat(WaylandState *ws, struct wl_registry *registry, uint32_t na
 		     uint32_t version);
 
 /*
+ * Draw the pointer cursor (a 16x24 arrow, hotspot 0,0) into a wl_shm buffer
+ * attached to a cursor surface; the proxy sets it on each pointer enter on its
+ * own surfaces. Precondition: ws->compositor and ws->shm are bound.
+ * Returns 0, or -1 after printing the failing call; on failure no cursor is
+ * set and everything created here is released by wayland_destroy().
+ */
+int input_cursor_init(WaylandState *ws);
+
+/*
  * For each scanout: read QEMU's Mouse.IsAbsolute on Console_<i> (5 s timeout;
  * on failure assume relative and log) and subscribe to PropertiesChanged so
  * that is_absolute follows QEMU's mouse mode.

@@ -74,6 +74,12 @@ typedef struct {
     unsigned long                     dropped_key_unmapped, call_errors;
     unsigned long                     gated_keys;       /* key presses not sent: pointer elsewhere */
 
+    /* Pointer cursor (input.c draws it, wayland_destroy releases it) */
+    struct wl_surface                *cursor_surface;
+    struct wl_buffer                 *cursor_buffer;
+    struct wl_shm_pool               *cursor_pool;
+    int                               cursor_fd;
+
     char                              vm_name[32];
 } WaylandState;
 

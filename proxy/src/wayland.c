@@ -114,6 +114,7 @@ WaylandState *wayland_init(const char *wayland_socket, const char *vm_name, int 
         ws->scanouts[i].p2p_fd = -1;
     }
     ws->drm_fd = -1;
+    ws->cursor_fd = -1;
     ws->pointer_focus = -1;
     ws->keyboard_focus = -1;
     strncpy(ws->vm_name, vm_name, sizeof(ws->vm_name) - 1);
@@ -131,6 +132,8 @@ WaylandState *wayland_init(const char *wayland_socket, const char *vm_name, int 
     wl_display_roundtrip(ws->display);
 
     if (!ws->compositor || !ws->wm_base || !ws->shm) { wayland_destroy(ws); return NULL; }
+    if (input_cursor_init(ws) != 0)
+        fprintf(stderr, "Input: no pointer cursor\n");
     return ws;
 }
 
@@ -188,6 +191,10 @@ void wayland_destroy(WaylandState *ws) {
         if (ws->scanouts[i].xdg_surface) xdg_surface_destroy(ws->scanouts[i].xdg_surface);
         if (ws->scanouts[i].surface) wl_surface_destroy(ws->scanouts[i].surface);
     }
+    if (ws->cursor_surface) wl_surface_destroy(ws->cursor_surface);
+    if (ws->cursor_buffer) wl_buffer_destroy(ws->cursor_buffer);
+    if (ws->cursor_pool) wl_shm_pool_destroy(ws->cursor_pool);
+    if (ws->cursor_fd >= 0) close(ws->cursor_fd);
     if (ws->keyboard) wl_keyboard_destroy(ws->keyboard);
     if (ws->pointer) wl_pointer_destroy(ws->pointer);
     if (ws->seat) wl_seat_destroy(ws->seat);

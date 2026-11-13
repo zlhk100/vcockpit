@@ -14,6 +14,7 @@
 #include "input.h"
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #define QEMU_DEST		"org.qemu"
@@ -77,6 +78,90 @@ static const struct {
 	{ 0x113, 5 },	/* BTN_SIDE */
 	{ 0x114, 6 },	/* BTN_EXTRA */
 };
+
+/*
+ * Pointer cursor, drawn by the proxy: neither guest's cursor reaches the host.
+ * 'X' black outline, 'o' white fill, '.' transparent. Hotspot (0,0).
+ */
+#define CURSOR_W	16
+#define CURSOR_H	24
+#define CURSOR_BLACK	0xff000000u	/* ARGB8888, premultiplied */
+#define CURSOR_WHITE	0xffffffffu
+
+static const char cursor_rows[CURSOR_H][CURSOR_W + 1] = {
+	"X...............",
+	"XX..............",
+	"XoX.............",
+	"XooX............",
+	"XoooX...........",
+	"XooooX..........",
+	"XoooooX.........",
+	"XooooooX........",
+	"XoooooooX.......",
+	"XooooooooX......",
+	"XoooooooooX.....",
+	"XooooooooooX....",
+	"XoooooooooooX...",
+	"XoooooooXXXXX...",
+	"XoooXoooX.......",
+	"XooXXoooX.......",
+	"XoX..XoooX......",
+	"XX...XoooX......",
+	"X.....XoooX.....",
+	"......XoooX.....",
+	".......XoooX....",
+	".......XoooX....",
+	"........XXX.....",
+	"................",
+};
+
+int input_cursor_init(WaylandState *ws)
+{
+	const size_t stride = CURSOR_W * sizeof(uint32_t);
+	const size_t size = stride * CURSOR_H;
+	int fd = memfd_create("proxy-cursor", MFD_CLOEXEC);
+
+	if (fd < 0) {
+		perror("Input: memfd_create(cursor)");
+		return -1;
+	}
+	ws->cursor_fd = fd;	/* closed by wayland_destroy */
+	if (ftruncate(fd, (off_t)size) != 0) {
+		perror("Input: ftruncate(cursor)");
+		return -1;
+	}
+
+	uint32_t *px = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+	if (px == MAP_FAILED) {
+		perror("Input: mmap(cursor)");
+		return -1;
+	}
+	for (size_t y = 0; y < CURSOR_H; y++) {
+		for (size_t x = 0; x < CURSOR_W; x++) {
+			char c = cursor_rows[y][x];
+
+			px[y * CURSOR_W + x] = c == 'X' ? CURSOR_BLACK :
+					       c == 'o' ? CURSOR_WHITE : 0u;
+		}
+	}
+	if (munmap(px, size) != 0)
+		perror("Input: munmap(cursor)");	/* mapping leaks; buffer still valid */
+
+	ws->cursor_pool = wl_shm_create_pool(ws->shm, fd, (int32_t)size);
+	ws->cursor_buffer = ws->cursor_pool ?
+		wl_shm_pool_create_buffer(ws->cursor_pool, 0, CURSOR_W, CURSOR_H,
+					  (int32_t)stride, WL_SHM_FORMAT_ARGB8888) : NULL;
+	ws->cursor_surface = wl_compositor_create_surface(ws->compositor);
+	if (!ws->cursor_pool || !ws->cursor_buffer || !ws->cursor_surface) {
+		fprintf(stderr, "Input: cursor buffer or surface not created\n");
+		return -1;
+	}
+	wl_surface_attach(ws->cursor_surface, ws->cursor_buffer, 0, 0);
+	wl_surface_damage(ws->cursor_surface, 0, 0, CURSOR_W, CURSOR_H);
+	wl_surface_commit(ws->cursor_surface);
+	return 0;
+}
 
 static int scanout_for_surface(const WaylandState *ws, const struct wl_surface *surface)
 {
@@ -244,12 +329,14 @@ enum keyboard_event {
 
 /* ---- wl_pointer ---- */
 
-static void pointer_enter(WaylandState *ws, struct wl_surface *surface, wl_fixed_t sx,
-			  wl_fixed_t sy)
+static void pointer_enter(WaylandState *ws, uint32_t serial, struct wl_surface *surface,
+			  wl_fixed_t sx, wl_fixed_t sy)
 {
 	ws->pointer_focus = scanout_for_surface(ws, surface);
 	if (ws->pointer_focus < 0)
 		return;	/* P2: not ours */
+	if (ws->pointer && ws->cursor_buffer && ws->cursor_surface)
+		wl_pointer_set_cursor(ws->pointer, serial, ws->cursor_surface, 0, 0);
 	ws->range_min_x = ws->range_min_y = 1 << 30;
 	ws->range_max_x = ws->range_max_y = -1;
 	ws->pending_x = sx;
@@ -346,7 +433,8 @@ static int pointer_dispatch(const void *impl, void *target, uint32_t opcode,
 
 	switch (opcode) {
 	case POINTER_ENTER:	/* serial, surface, surface_x, surface_y */
-		pointer_enter(ws, (struct wl_surface *)args[1].o, args[2].f, args[3].f);
+		pointer_enter(ws, args[0].u, (struct wl_surface *)args[1].o, args[2].f,
+			      args[3].f);
 		break;
 	case POINTER_LEAVE:	/* serial, surface */
 		pointer_leave(ws);
