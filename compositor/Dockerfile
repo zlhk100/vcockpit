@@ -62,7 +62,7 @@ RUN printf '#!/bin/bash\n\n' > /usr/local/bin/start-compositor.sh && \
     printf 'echo ""\n\n' >> /usr/local/bin/start-compositor.sh && \
     printf 'echo "Starting Weston compositor..."\n' >> /usr/local/bin/start-compositor.sh && \
     printf 'weston --backend=x11-backend.so \\\n' >> /usr/local/bin/start-compositor.sh && \
-    printf '       --width=3840 --height=1080 \\\n' >> /usr/local/bin/start-compositor.sh && \
+    printf '       --width=${WESTON_WIDTH:-3840} --height=${WESTON_HEIGHT:-1080} \\\n' >> /usr/local/bin/start-compositor.sh && \
     printf '       --config=/etc/xdg/weston/weston.ini &\n\n' >> /usr/local/bin/start-compositor.sh && \
     printf 'WESTON_PID=$!\n' >> /usr/local/bin/start-compositor.sh && \
     printf 'sleep 4\n\n' >> /usr/local/bin/start-compositor.sh && \
