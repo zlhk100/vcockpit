@@ -95,3 +95,17 @@ RUN gcc /tmp/ivi-input-set.c \
     -Wl,-rpath,/usr/local/lib \
     -o /usr/local/bin/ivi-input-set && \
     chmod +x /usr/local/bin/ivi-input-set
+
+# Build ivi-background, the opaque background surface
+COPY ivi-background.c /tmp/ivi-background.c
+RUN wayland-scanner client-header \
+        /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml \
+        /tmp/xdg-shell-client-protocol.h && \
+    wayland-scanner private-code \
+        /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml \
+        /tmp/xdg-shell-protocol.c && \
+    gcc /tmp/ivi-background.c /tmp/xdg-shell-protocol.c \
+    -I/tmp \
+    -lwayland-client \
+    -o /usr/local/bin/ivi-background && \
+    chmod +x /usr/local/bin/ivi-background
