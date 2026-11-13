@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright (C) 2026 Lei Zhou
+#
+# vcockpit demo content for the Debian guest: an X server on the virtio GPU
+# and glxgears filling the 1920x1080 screen, started at boot, so the host
+# launcher never logs into the guest. Runs as the image's user `debian`;
+# Xorg is started through that user's passwordless sudo, as in the manual
+# steps. Install: see README.md in this directory.
+
+[Unit]
+Description=vcockpit demo: Xorg and glxgears on the virtio GPU
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+User=debian
+ExecStart=/bin/sh -c 'sudo Xorg :0 -ac -noreset -nolisten tcp & for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -S /tmp/.X11-unix/X0 ] && break; sleep 0.5; done; DISPLAY=:0 exec glxgears -geometry 1920x1080+0+0'
+
+[Install]
+WantedBy=multi-user.target
