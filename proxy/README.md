@@ -47,6 +47,12 @@ QEMU must already be on the session bus as `org.qemu`
 | `Disable` | Detach the buffer |
 | `Scanout`, `Update` (pixel copy) | Refused with an error |
 
+Guest frames are shown as opaque. A frame whose format has an alpha
+channel (ABGR8888, ARGB8888 and their 2101010 forms) is imported as the
+same format without it, logged once per format, and each surface's opaque
+region covers the whole surface, so the compositor never blends a guest
+picture with what was on screen before.
+
 ## Input
 
 Pointer and keyboard events that the compositor delivers to a proxy

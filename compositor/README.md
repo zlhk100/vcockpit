@@ -25,6 +25,14 @@ input; `ivi-input-set all` gives keyboard and pointer focus to both
 surfaces, for two guests side by side (see
 [running the proxy](../docs/running-the-proxy.md#7-two-guests-side-by-side)).
 
+It also contains `/usr/local/bin/ivi-background`, built from
+`ivi-background.c`: a client that shows one opaque black 16x16 surface
+titled `vcockpit-background` until it receives SIGINT or SIGTERM. Map that
+title to an IVI surface in `weston.ini` and scale it over the whole output,
+under the guest surfaces: the IVI shell has no background of its own, and
+areas no surface covers are never repainted (see
+[running the proxy](../docs/running-the-proxy.md#background)).
+
 At run time, mount a `weston.ini` that maps window titles to IVI surface
 IDs over `/etc/xdg/weston/weston.ini`; see
 [docs/running-the-proxy.md](../docs/running-the-proxy.md).

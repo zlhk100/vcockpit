@@ -38,6 +38,10 @@ surface-id=1000
 app-title=QEMU (qemu-debian-0)
 surface-id=2000
 
+[desktop-app]
+app-title=vcockpit-background
+surface-id=10
+
 [desktop-app-default]
 default-surface-id=30
 default-surface-id-max=200
@@ -137,6 +141,20 @@ Console_0: RegisterListener OK — p2p connection established
 ScanoutDMABUF: scanout=0 1280x720 fourcc=0x... modifier=0x...
 ScanoutDMABUF: committed 1280x720 to surface
 ```
+
+A guest display has no transparency, so the proxy imports a guest frame
+whose format has an alpha channel as the same format without it, and marks
+its surface opaque. It logs each substitution once:
+
+```
+ScanoutDMABUF: importing fourcc 0x34324241 as opaque 0x34324258
+```
+
+(0x34324241 is ABGR8888, 0x34324258 XBGR8888.) Without this, the
+compositor blends the guest picture with whatever was on screen before
+wherever the guest leaves the alpha byte undefined, as an X server's
+depth-24 framebuffer does, and old cursor images and old frames show
+through.
 
 ## 4. Place the surface
 
@@ -238,6 +256,21 @@ xwininfo -root -tree | grep 'Weston Compositor'
 
 Both should report 2880x1080.
 
+### Background
+
+The IVI shell has no background, and Weston repaints only areas covered
+by a surface: output pixels outside both zones would keep every old
+cursor image. Start the background client, which shows an opaque black
+surface titled `vcockpit-background` (surface 10 in the ini of section 1):
+
+```bash
+docker exec -d -e XDG_RUNTIME_DIR=/tmp/weston-runtime -e WAYLAND_DISPLAY=wayland-1 \
+    dash-test /usr/local/bin/ivi-background
+```
+
+It runs until the container stops or it receives SIGINT or SIGTERM. It is
+placed under both zones in the placement below.
+
 ### Buses
 
 Start each bus before its QEMU:
@@ -311,10 +344,12 @@ The compositor maps `QEMU (qemu-debian-0)` to surface 2000 and
 ### Placement
 
 Two equal 16:9 zones, side by side and vertically centred in the
-2880x1080 output. Each guest picture is scaled to its zone:
+2880x1080 output, over the background, which covers the whole output.
+Each guest picture is scaled to its zone:
 
-| Guest | Surface | Source region | Destination region | Scale |
+| Picture | Surface | Source region | Destination region | Scale |
 |---|---|---|---|---|
+| Background 16x16 | 10 | 0 0 16 16 | 0 0 2880 1080 | 180 x 67.5 |
 | Debian 1920x1080 | 2000 | 0 0 1920 1080 | 0 135 1440 810 | 0.75 |
 | QNX 1280x720 | 1000 | 0 0 1280 720 | 1440 135 1440 810 | 1.125 |
 
@@ -322,6 +357,14 @@ Two equal 16:9 zones, side by side and vertically centred in the
 docker exec dash-test bash -c '
     export XDG_RUNTIME_DIR=/tmp/weston-runtime
     export WAYLAND_DISPLAY=wayland-1
+    LayerManagerControl create layer 10 2880 1080
+    LayerManagerControl add surface 10 to layer 10
+    LayerManagerControl set surface 10 source region 0 0 16 16
+    LayerManagerControl set surface 10 destination region 0 0 2880 1080
+    LayerManagerControl set layer 10 source region 0 0 2880 1080
+    LayerManagerControl set layer 10 destination region 0 0 2880 1080
+    LayerManagerControl set layer 10 visibility 1
+    LayerManagerControl set surface 10 visibility 1
     LayerManagerControl create layer 2000 2880 1080
     LayerManagerControl add surface 2000 to layer 2000
     LayerManagerControl set surface 2000 source region 0 0 1920 1080
@@ -338,7 +381,7 @@ docker exec dash-test bash -c '
     LayerManagerControl set layer 1000 destination region 0 0 2880 1080
     LayerManagerControl set layer 1000 visibility 1
     LayerManagerControl set surface 1000 visibility 1
-    LayerManagerControl set screen 0 render order 2000,1000'
+    LayerManagerControl set screen 0 render order 10,2000,1000'
 ```
 
 The proxies need no scale: pointer positions reach them in the guest's own
@@ -390,19 +433,21 @@ window.
 ### Stop
 
 Stop each proxy with Ctrl+C or SIGTERM, then the two QEMUs, then the two
-bus daemons, then `docker stop dash-test`. Stopping one proxy does not
-stop the other surface's frames.
+bus daemons, then `docker stop dash-test`, which also ends the background
+client. Stopping one proxy does not stop the other surface's frames.
 
 ### Known issues
 
 - glxgears draws a 16:9 window cut off at the top and bottom. The guest's
   own picture shows the same cut, so it comes from the client, not from
   placement.
-- Copies of the proxy's cursor can stay on screen where the pointer has
-  been, after the pointer has moved on: on the background around the
-  zones and in the Debian zone, but not in the QNX zone. They remain with
-  the output size equal to the window size (2880x1080). The cause is not
-  established.
+- Without the background and the opaque import (proxy builds before this
+  change), copies of the cursor stayed on screen where the pointer had
+  been: on the background around the zones and in the Debian zone, where
+  old frames of the gears also showed through after the view was rotated.
+  With both in place, a sweep along every zone edge and across the
+  background leaves only the cursor at the pointer, and rotated gears leave
+  no trace.
 - In one earlier run the Debian picture stopped updating after about three
   minutes (glxgears fell from about 260 frames per second to almost none,
   and surface 2000 received no more frames) with no error in the guest
