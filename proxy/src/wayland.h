@@ -58,6 +58,9 @@ typedef struct {
         int                           width, height;    /* guest scanout size, from frames */
     } scanouts[MAX_SCANOUTS];
 
+    /* Opaque import (wayland.c): bit n set once alpha->opaque substitution n has been logged */
+    unsigned int                      opaque_logged;
+
     /* Input (input.c): seat, focus, pending motion, held state, counters */
     struct wl_seat                   *seat;
     struct wl_pointer                *pointer;

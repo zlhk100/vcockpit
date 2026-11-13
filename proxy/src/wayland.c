@@ -166,6 +166,18 @@ void wayland_create_surface(WaylandState *ws, int scanout_index) {
     xdg_toplevel_set_title(ws->scanouts[scanout_index].toplevel, ws->scanouts[scanout_index].title);
     xdg_toplevel_set_app_id(ws->scanouts[scanout_index].toplevel, "qemu-system-x86_64");
 
+    /* A guest display has no transparency: the whole surface is opaque, so the
+     * compositor never blends it with what was on screen before. The region is
+     * clipped to the surface size by the compositor. */
+    struct wl_region *opaque = wl_compositor_create_region(ws->compositor);
+    if (opaque) {
+        wl_region_add(opaque, 0, 0, INT32_MAX, INT32_MAX);
+        wl_surface_set_opaque_region(ws->scanouts[scanout_index].surface, opaque);
+        wl_region_destroy(opaque);
+    } else {
+        fprintf(stderr, "WARNING: wl_compositor_create_region failed; surface not marked opaque\n");
+    }
+
     wl_surface_commit(ws->scanouts[scanout_index].surface);
     wl_display_flush(ws->display);
     while (!ws->scanouts[scanout_index].configured) { wl_display_dispatch(ws->display); }
@@ -298,11 +310,40 @@ void wayland_gbm_destroy(WaylandState *ws) {
  * any server round-trip. The compositor validates the buffer lazily on
  * first attach. No callback, no waiting, no deadlock.
  */
+/* Alpha formats and their opaque twins (same layout, alpha byte ignored).
+ * The guest's alpha byte is not meaningful (an X server's depth-24 framebuffer
+ * leaves it undefined), so frames are imported as opaque. */
+static const uint32_t opaque_twin[][2] = {
+    { DRM_FORMAT_ABGR8888,    DRM_FORMAT_XBGR8888 },
+    { DRM_FORMAT_ARGB8888,    DRM_FORMAT_XRGB8888 },
+    { DRM_FORMAT_ABGR2101010, DRM_FORMAT_XBGR2101010 },
+    { DRM_FORMAT_ARGB2101010, DRM_FORMAT_XRGB2101010 },
+};
+
+/* Return the opaque twin of an alpha format, or the format itself; log each
+ * substitution once per process (bit n of ws->opaque_logged). */
+static uint32_t opaque_fourcc(WaylandState *ws, uint32_t fourcc)
+{
+    for (size_t n = 0; n < sizeof(opaque_twin) / sizeof(opaque_twin[0]); n++) {
+        if (opaque_twin[n][0] != fourcc)
+            continue;
+        if (!(ws->opaque_logged & (1u << n))) {
+            ws->opaque_logged |= 1u << n;
+            printf("ScanoutDMABUF: importing fourcc 0x%08x as opaque 0x%08x\n",
+                   fourcc, opaque_twin[n][1]);
+        }
+        return opaque_twin[n][1];
+    }
+    return fourcc;
+}
+
 void wayland_import_qemu_dmabuf(WaylandState *ws, int scanout_index, int fd,
                                 uint32_t w, uint32_t h, uint32_t stride,
                                 uint32_t fourcc, uint64_t modifier)
 {
     if (!ws->linux_dmabuf || scanout_index >= ws->n_scanouts) return;
+
+    fourcc = opaque_fourcc(ws, fourcc);
 
     /* Destroy any previous pending params (shouldn't happen, but be safe) */
     if (ws->scanouts[scanout_index].params) {
