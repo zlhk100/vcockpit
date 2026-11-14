@@ -199,7 +199,8 @@ chmod +x cluster-gauge
 
 The gauge fills the QNX surface. Stop it with Ctrl+C.
 
-Starting the gauge automatically at guest boot is not covered here yet.
+To start the gauge automatically at guest boot, see
+[Autostart overlay](../../docs/qnx-guest.md#autostart-overlay).
 
 ## Options and output
 
